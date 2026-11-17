@@ -1,0 +1,3 @@
+# GitHub Pages requires a checked-in site for branch-based publishing.
+# Keep these generated deployment assets collapsed in code reviews.
+docs/** linguist-generated=true
