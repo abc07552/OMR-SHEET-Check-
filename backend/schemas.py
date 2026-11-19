@@ -256,6 +256,20 @@ class Detection(Document):
     verified: bool = False
 
 
+class SourceTransform(Document):
+    objectId: Identifier
+    pageIndex: int = Field(ge=0, le=499)
+    sourceToAligned: list[list[float]] = Field(min_length=3, max_length=3)
+
+    @model_validator(mode="after")
+    def valid_matrix(self):
+        import math
+
+        if any(len(row) != 3 or any(not math.isfinite(v) or abs(v) > 1e8 for v in row) for row in self.sourceToAligned):
+            raise ValueError("Invalid original-image coordinate transform.")
+        return self
+
+
 class Result(Document):
     id: Identifier
     studentId: Identifier
@@ -279,6 +293,7 @@ class Result(Document):
     detectedOptions: list[list[Option]] | None = Field(default=None, max_length=500)
     answerMeta: list[Detection] = Field(default_factory=list, max_length=500)
     scanIds: list[Identifier] = Field(default_factory=list, max_length=500)
+    sourceTransforms: list[SourceTransform] = Field(default_factory=list, max_length=500)
 
 
 class Workspace(Document):
@@ -289,7 +304,7 @@ class Workspace(Document):
     activeSchoolId: Identifier
     classes: list[Classroom] = Field(default_factory=list, max_length=500)
     students: list[Student] = Field(default_factory=list, max_length=20000)
-    exams: list[Exam] = Field(min_length=1, max_length=5000)
+    exams: list[Exam] = Field(default_factory=list, max_length=5000)
     results: list[Result] = Field(default_factory=list, max_length=50000)
 
     @model_validator(mode="after")
@@ -338,6 +353,23 @@ class Workspace(Document):
                 or any(len(set(a)) != len(a) or not set(a) <= set("ABCDE"[: e.optionCount]) for a in r.detectedOptions)
             ):
                 raise ValueError("Invalid multi-answer response data.")
+            if r.detectedOptions is not None and any(
+                a != (selected[0] if len(selected) == 1 else None)
+                for a, selected in zip(r.answers, r.detectedOptions, strict=True)
+            ):
+                raise ValueError(
+                    "Scalar responses and selected-option evidence disagree. Verify the correction explicitly."
+                )
+            if any(
+                not set(a.selected) <= set("ABCDE"[: e.optionCount])
+                or len(a.selected) != len(set(a.selected))
+                or (r.detectedOptions is not None and a.selected != r.detectedOptions[a.question])
+                for a in r.answerMeta
+                if a.question < e.questions
+            ):
+                raise ValueError("Answer evidence must match the selected response and available options.")
+            if any(t.objectId not in r.scanIds for t in r.sourceTransforms):
+                raise ValueError("A page transform must refer to a linked original image.")
             if len({a.question for a in r.answerMeta}) != len(r.answerMeta) or any(
                 a.question >= e.questions for a in r.answerMeta
             ):

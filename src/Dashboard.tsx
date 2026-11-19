@@ -12,7 +12,6 @@ import {
   YAxis,
 } from "recharts";
 import {
-  Activity,
   ArrowDownToLine,
   ArrowRight,
   ArrowUpRight,
@@ -20,9 +19,7 @@ import {
   CircleDot,
   ScanLine,
   Sparkles,
-  Target,
   TrendingUp,
-  Users,
 } from "lucide-react";
 import type { Exam, Page, Result, Workspace } from "./data";
 import {
@@ -42,6 +39,7 @@ import {
   Select,
 } from "./components";
 import { ExamBar } from "./Overview";
+import DashboardMetrics from "./DashboardMetrics";
 interface Props {
   workspace: Workspace;
   exam: Exam;
@@ -52,7 +50,7 @@ interface Props {
   onExport: () => void;
   onQuestion: (q: number) => void;
 }
-const palette = ["#b9f287", "#8a9fff", "#f4c681", "#f18c91"];
+const palette = ["#5b91ff", "#9d8cff", "#f4c681", "#f18c91"];
 export default function Dashboard({
   workspace,
   exam,
@@ -117,71 +115,7 @@ export default function Dashboard({
         }
       />
       <ExamBar workspace={workspace} exam={exam} setExamId={setExamId} />
-      <div className="v2-stat-grid">
-        {[
-          {
-            label: "Registered students",
-            value: String(workspace.students?.length || 0),
-            icon: Users,
-            note: `${workspace.classes?.length || 0} classes in your school`,
-            className: "mint",
-          },
-          {
-            label: "Sheets evaluated",
-            value: String(stats.evaluated),
-            icon: CheckCheck,
-            note: stats.review
-              ? `${stats.review} sheets awaiting review`
-              : "All submitted sheets evaluated",
-            className: "violet",
-          },
-          {
-            label: "Average score",
-            value: `${stats.average.toFixed(1)}%`,
-            icon: Activity,
-            note: "Across evaluated answer sheets",
-            className: "peach",
-          },
-          {
-            label: "Pass rate",
-            value: `${stats.passRate.toFixed(1)}%`,
-            icon: Target,
-            note: `Passing threshold · ${exam.passPercentage}%`,
-            className: "blue",
-          },
-        ].map((s, i) => (
-          <section className={`v2-stat ${s.className}`} key={s.label}>
-            <div>
-              <span>{s.label}</span>
-              <span className="v2-stat-icon">
-                <s.icon size={18} />
-              </span>
-            </div>
-            <strong>
-              {s.value}
-              <svg viewBox="0 0 100 30" aria-hidden="true">
-                <path
-                  d={
-                    [
-                      "M0 25L15 19L28 23L43 10L58 16L72 6L86 10L100 2",
-                      "M0 25L14 24L30 12L43 15L57 7L70 14L85 8L100 4",
-                      "M0 25L16 15L31 19L44 12L59 19L72 9L85 12L100 2",
-                      "M0 25L15 22L30 15L45 17L59 8L73 11L87 4L100 2",
-                    ][i]
-                  }
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                />
-              </svg>
-            </strong>
-            <small>
-              <i />
-              {s.note}
-            </small>
-          </section>
-        ))}
-      </div>
+      <DashboardMetrics workspace={workspace} />
       <div className="v2-chart-grid">
         <section className="card v2-performance">
           <div className="card-heading">
@@ -216,15 +150,15 @@ export default function Dashboard({
                     <linearGradient id="mint-area" x1="0" y1="0" x2="0" y2="1">
                       <stop
                         offset="0%"
-                        stopColor="#b9f287"
+                        stopColor="#5b91ff"
                         stopOpacity={0.22}
                       />
-                      <stop offset="100%" stopColor="#b9f287" stopOpacity={0} />
+                      <stop offset="100%" stopColor="#5b91ff" stopOpacity={0} />
                     </linearGradient>
                   </defs>
                   <CartesianGrid
                     vertical={false}
-                    stroke="#29312f"
+                    stroke="#263651"
                     strokeDasharray="3 5"
                   />
                   <XAxis
@@ -257,12 +191,12 @@ export default function Dashboard({
                     isAnimationActive={false}
                     type="monotone"
                     dataKey={metric}
-                    stroke="#b9f287"
+                    stroke="#5b91ff"
                     strokeWidth={2.5}
                     fill="url(#mint-area)"
                     dot={{
                       r: 3,
-                      stroke: "#b9f287",
+                      stroke: "#5b91ff",
                       fill: "#18201d",
                       strokeWidth: 2,
                     }}

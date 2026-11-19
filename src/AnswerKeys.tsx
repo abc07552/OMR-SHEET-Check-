@@ -593,7 +593,7 @@ export function NewExamModal({
   const [title, setTitle] = useState("");
   const [subject, setSubject] = useState("Physics");
   const [count, setCount] = useState("50");
-  const [options, setOptions] = useState<4 | 5>(5);
+  const [options, setOptions] = useState<2 | 3 | 4 | 5>(5);
   return (
     <Modal title="A fresh start, one answer at a time." onClose={onClose}>
       <form
@@ -668,8 +668,12 @@ export function NewExamModal({
               Answer options
               <Select
                 value={options}
-                onChange={(e) => setOptions(Number(e.target.value) as 4 | 5)}
+                onChange={(e) =>
+                  setOptions(Number(e.target.value) as 2 | 3 | 4 | 5)
+                }
               >
+                <option value={2}>2 options · A–B</option>
+                <option value={3}>3 options · A–C</option>
                 <option value={4}>A–D · four options</option>
                 <option value={5}>A–E · five options</option>
               </Select>

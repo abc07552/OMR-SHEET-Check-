@@ -40,6 +40,9 @@ import {
 } from "./components";
 import { ExamBar } from "./Overview";
 import { studentPDF } from "./documents";
+import { verifyResponse } from "./verification";
+import ScanEvidence from "./ScanEvidence";
+import { useSession } from "./session";
 interface Props {
   workspace: Workspace;
   exam: Exam;
@@ -370,7 +373,20 @@ export function StudentDetail({
   onDelete?: () => void;
   toast: (text: string) => void;
 }) {
+  const session = useSession(),
+    member = session.user?.memberships.find(
+      (m) => m.schoolId === workspace?.activeSchoolId,
+    ),
+    canEdit =
+      session.phase !== "authenticated" ||
+      member?.role === "admin" ||
+      member?.permissions?.scan === true;
   const [answers, setAnswers] = useState([...result.answers]);
+  const [detectedOptions, setDetectedOptions] = useState(
+    result.detectedOptions,
+  );
+  const [answerMeta, setAnswerMeta] = useState(result.answerMeta);
+  const [questionSet, setQuestionSet] = useState(result.questionSet || "A");
   const [name, setName] = useState(result.name);
   const [roll, setRoll] = useState(result.roll);
   const [section, setSection] = useState(result.section);
@@ -389,6 +405,9 @@ export function StudentDetail({
   const draft = {
     ...result,
     answers,
+    detectedOptions,
+    answerMeta,
+    questionSet,
     flagged,
     name: name.trim(),
     roll: roll.trim(),
@@ -404,6 +423,8 @@ export function StudentDetail({
   const dirty =
     JSON.stringify(answers) !== JSON.stringify(result.answers) ||
     JSON.stringify(flagged) !== JSON.stringify(result.flagged) ||
+    JSON.stringify(answerMeta) !== JSON.stringify(result.answerMeta) ||
+    questionSet !== (result.questionSet || "A") ||
     name !== result.name ||
     roll !== result.roll ||
     section !== result.section ||
@@ -413,13 +434,24 @@ export function StudentDetail({
     if (!dirty || confirm("Discard unsaved response or identity changes?"))
       onClose();
   };
-  const setResponse = (option: Option | null) => {
-    if (activeQuestion === null) return;
-    setAnswers((a) => a.map((v, i) => (i === activeQuestion ? option : v)));
-    setFlagged((f) => f.filter((q) => q !== activeQuestion));
+  const setResponse = (option: Option | null, selected?: Option[]) => {
+    if (activeQuestion === null || !canEdit) return;
+    const updated = verifyResponse(
+      draft,
+      activeQuestion,
+      selected || (option ? [option] : []),
+    );
+    setAnswers(updated.answers);
+    setDetectedOptions(updated.detectedOptions);
+    setAnswerMeta(updated.answerMeta);
+    setFlagged(updated.flagged);
     setEditing(true);
   };
   const save = () => {
+    if (!canEdit) {
+      toast("Your account cannot change responses.");
+      return;
+    }
     if (!name.trim() || !roll.trim() || !section.trim()) {
       toast("Name, roll number and class are required.");
       return;
@@ -488,6 +520,7 @@ export function StudentDetail({
               Student name
               <input
                 value={name}
+                readOnly={!canEdit}
                 maxLength={120}
                 onChange={(e) => setName(e.target.value)}
               />
@@ -496,6 +529,7 @@ export function StudentDetail({
               Roll number
               <input
                 value={roll}
+                readOnly={!canEdit}
                 maxLength={40}
                 onChange={(e) => {
                   const value = e.target.value;
@@ -515,15 +549,36 @@ export function StudentDetail({
             Class / section
             <input
               value={section}
+              readOnly={!canEdit}
               maxLength={60}
               onChange={(e) => setSection(e.target.value)}
             />
           </label>
+          {!!exam.questionSets?.length && (
+            <label>
+              Verified question set
+              <Select
+                value={questionSet}
+                disabled={!canEdit}
+                onChange={(e) => {
+                  setQuestionSet(e.target.value);
+                  setEditing(true);
+                }}
+              >
+                {exam.questionSets.map((s) => (
+                  <option key={s.code} value={s.code}>
+                    {s.code}
+                  </option>
+                ))}
+              </Select>
+            </label>
+          )}
           {result.identityReview && (
             <label className="checkbox-label warning">
               <input
                 type="checkbox"
                 checked={identityVerified}
+                disabled={!canEdit}
                 onChange={(e) => setIdentityVerified(e.target.checked)}
               />
               I have verified this student’s identity against the sheet.
@@ -545,6 +600,7 @@ export function StudentDetail({
                   <input
                     type="checkbox"
                     checked={acceptMissing}
+                    disabled={!canEdit}
                     onChange={(e) => setAcceptMissing(e.target.checked)}
                   />
                   Accept missing pages as unanswered
@@ -629,15 +685,15 @@ export function StudentDetail({
           </div>
         </div>
         <div className="student-answer-grid">
-          {exam.answers.map((key, q) => (
+          {graded.questions.map((outcome, q) => (
             <button
               key={q}
-              className={`${flagged.includes(q) ? "flagged-answer" : !answers[q] ? "blank-answer" : answers[q] === key ? "correct-answer" : "wrong-answer"} ${activeQuestion === q ? "active" : ""}`}
+              className={`${flagged.includes(q) ? "flagged-answer" : !outcome.selected.length ? "blank-answer" : outcome.status === "correct" ? "correct-answer" : "wrong-answer"} ${activeQuestion === q ? "active" : ""}`}
               onClick={() => setActiveQuestion(q)}
-              aria-label={`Question ${q + 1}, ${flagged.includes(q) ? "needs review" : !answers[q] ? "unanswered" : answers[q] === key ? "correct" : "incorrect"}`}
+              aria-label={`Question ${q + 1}, ${flagged.includes(q) ? "needs review" : !outcome.selected.length ? "unanswered" : outcome.status === "correct" ? "correct" : "incorrect"}`}
             >
               <span>{q + 1}</span>
-              <strong>{answers[q] || "–"}</strong>
+              <strong>{outcome.selected.join("") || "–"}</strong>
             </button>
           ))}
         </div>
@@ -647,7 +703,10 @@ export function StudentDetail({
               <strong>Question {activeQuestion + 1}</strong>
               <span>
                 Correct answer:{" "}
-                <b>{exam.answers[activeQuestion] || "Not set"}</b>
+                <b>
+                  {graded.questions[activeQuestion]?.expected.join(", ") ||
+                    "Not set"}
+                </b>
                 {flagged.includes(activeQuestion)
                   ? " · Confirm the mark below"
                   : ""}
@@ -658,6 +717,7 @@ export function StudentDetail({
                 <button
                   className={answers[activeQuestion] === o ? "selected" : ""}
                   key={o}
+                  disabled={!canEdit}
                   onClick={() => setResponse(o)}
                   aria-label={`Set question ${activeQuestion + 1} response to ${o}`}
                 >
@@ -666,13 +726,34 @@ export function StudentDetail({
               ))}
               <button
                 className={`blank-option ${!answers[activeQuestion] ? "selected" : ""}`}
+                disabled={!canEdit}
                 onClick={() => setResponse(null)}
               >
                 Unanswered
               </button>
+              {(detectedOptions?.[activeQuestion]?.length || 0) > 1 && (
+                <button
+                  disabled={!canEdit}
+                  className="button button-secondary"
+                  onClick={() =>
+                    setResponse(null, detectedOptions![activeQuestion])
+                  }
+                >
+                  Verify detected multiple marks (
+                  {detectedOptions![activeQuestion].join(", ")})
+                </button>
+              )}
             </div>
           </div>
         )}
+        <ScanEvidence
+          result={draft}
+          school={workspace?.activeSchoolId || ""}
+          question={activeQuestion}
+          questionsPerPage={
+            exam.layout?.questionsPerPage || Math.min(100, exam.questions)
+          }
+        />
         <p className="detail-caption">
           {result.source === "demo"
             ? "Sample student record · "
@@ -681,7 +762,7 @@ export function StudentDetail({
         </p>
       </div>
       <div className="modal-footer detail-footer">
-        {onDelete && (
+        {onDelete && canEdit && (
           <button
             className="text-button danger-text"
             onClick={() => {
@@ -735,7 +816,7 @@ export function StudentDetail({
           </button>
           <button
             className="button button-primary"
-            disabled={!dirty && !editing}
+            disabled={!canEdit || (!dirty && !editing)}
             onClick={save}
           >
             <Save size={15} />

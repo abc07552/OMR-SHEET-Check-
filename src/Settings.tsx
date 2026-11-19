@@ -147,7 +147,9 @@ export default function Settings({
               <div className="key-footer">
                 <span className="saved-indicator">
                   <Check size={13} />
-                  {cloud ? "SQLite shared storage" : "Saved on this device"}
+                  {cloud
+                    ? "Server-enforced shared storage"
+                    : "Saved on this device"}
                 </span>
                 <button
                   className="button button-primary"
@@ -391,7 +393,7 @@ export default function Settings({
             </h2>
             <p>
               {cloud
-                ? "Administrator and teacher permissions are checked on every server request. Sessions use HttpOnly cookies; passwords are hashed with scrypt."
+                ? "Administrator and teacher permissions are checked on every server request. Sessions use HttpOnly cookies; FastAPI passwords use Argon2id. The preserved Node service uses scrypt and can be migrated without resetting passwords."
                 : "This mode saves to your browser. It is not protected by an account login, and does not sync across devices."}
             </p>
             <button className="text-link" onClick={() => navigate("backups")}>
@@ -409,8 +411,8 @@ export default function Settings({
             <div className="form-fields">
               <p>
                 {cloud
-                  ? "Your browser is connected to the Markly Node API. Keep its persistent data directory backed up."
-                  : "GitHub Pages serves the offline app only. Secure logins, shared SQLite data, and automatic server backups need the included Node backend on a persistent server."}
+                  ? "Your browser is connected to the shared API. Check Sync & system for the actual backend, database, storage and recovery configuration."
+                  : "GitHub Pages serves the offline app only. Secure logins, PostgreSQL data, and encrypted server backups need the included FastAPI backend on a persistent server."}
               </p>
               <p className="small muted">
                 Deployment instructions, environment variables, and a Dockerfile

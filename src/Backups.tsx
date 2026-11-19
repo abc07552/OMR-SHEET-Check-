@@ -36,11 +36,13 @@ export default function Backups({
   onRestore,
   reload,
   toast,
+  revision,
 }: {
   workspace: Workspace;
   onRestore: (w: Workspace) => void;
   reload: () => Promise<void>;
   toast: (s: string) => void;
+  revision?: number;
 }) {
   const session = useSession(),
     cloud = session.phase === "authenticated",
@@ -126,7 +128,7 @@ export default function Backups({
             </strong>
             <p>
               {cloud
-                ? "SQLite persistence · server-enforced access"
+                ? "Encrypted recovery · server-enforced access"
                 : "Browser storage · no account authentication"}
             </p>
           </div>
@@ -345,7 +347,7 @@ export default function Backups({
               description={
                 cloud
                   ? "Ask your school administrator to create or restore server backups."
-                  : "GitHub Pages hosts the offline app only. Deploy the included Node server with persistent storage to enable accounts, shared data, and server backups."
+                  : "GitHub Pages hosts the offline app only. Deploy the included FastAPI server with persistent storage to enable accounts, shared data, and server backups."
               }
             />
           )}
@@ -511,7 +513,10 @@ export default function Backups({
                   `/schools/${schoolId}/backups/${restoreServer.id}/restore`,
                   {
                     method: "POST",
-                    body: JSON.stringify({ password: currentPassword }),
+                    body: JSON.stringify({
+                      password: currentPassword,
+                      revision,
+                    }),
                   },
                 );
                 setRestoreServer(null);
@@ -561,7 +566,8 @@ export default function Backups({
       <p className="page-bottom-note">
         <Check size={13} />
         Backups contain assessment data, not passwords or user accounts. Protect
-        the SQLite database and server volume separately.
+        the PostgreSQL database, encryption key and original-image storage
+        separately.
       </p>
     </>
   );

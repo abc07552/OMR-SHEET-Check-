@@ -9,12 +9,12 @@ from datetime import timedelta
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from openpyxl import load_workbook
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, model_validator
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .. import models as m
-from ..schemas import Student, Workspace
+from ..schemas import Student, Workspace, raster
 from ..scoring import analytics, evaluate
 from ..security import (
     allowed_exam,
@@ -250,12 +250,13 @@ def portal_profile(
 
 @router.get("/schools/{school_id}/settings")
 def read_settings(school_id: str, user: m.User = Depends(current_user), db: Session = Depends(db_session)):
-    membership(db, user, school_id, "admin")
+    membership(db, user, school_id, "staff")
     school = db.get(m.School, school_id)
     return {"settings": school.settings, "revision": school.revision}
 
 
 class InstitutionSettings(BaseModel):
+    logo: str = Field(default="", max_length=500000)
     academicSession: str = Field(default="", max_length=40)
     contactEmail: str = Field(default="", max_length=200)
     contactPhone: str = Field(default="", max_length=40)
@@ -264,6 +265,26 @@ class InstitutionSettings(BaseModel):
     defaultPassPercentage: float = Field(default=40, ge=1, le=100)
     theme: str = Field(default="dark", pattern="^(dark|light|system)$")
     revision: int = Field(ge=1)
+
+    @model_validator(mode="after")
+    def valid_contacts_and_logo(self):
+        import base64
+
+        from PIL import Image
+        from pydantic import EmailStr, TypeAdapter
+
+        if self.contactEmail:
+            TypeAdapter(EmailStr).validate_python(self.contactEmail)
+        if self.logo:
+            raster(self.logo, 500000)
+            try:
+                with Image.open(io.BytesIO(base64.b64decode(self.logo.split(",", 1)[1]))) as image:
+                    if image.width * image.height > 4_000_000:
+                        raise ValueError("Use an institution logo with at most four million pixels.")
+                    image.verify()
+            except (OSError, ValueError, Image.DecompressionBombError) as exc:
+                raise ValueError("Use a small valid raster institution logo.") from exc
+        return self
 
 
 @router.put("/schools/{school_id}/settings")
@@ -374,7 +395,14 @@ def preview_import(
     row, plan = import_plan(db, data.uploadId, user, school_id)
     if not all(data.mapping.get(x) in plan["headers"] for x in ("name", "roll")):
         raise HTTPException(400, "Map the required name and roll columns.")
-    classes = db.scalars(select(m.Classroom).where(m.Classroom.school_id == school_id)).all()
+    mapped = [v for v in data.mapping.values() if v]
+    if len(mapped) != len(set(mapped)):
+        raise HTTPException(400, "Map each source column to only one student field.")
+    classes = [
+        c
+        for c in db.scalars(select(m.Classroom).where(m.Classroom.school_id == school_id))
+        if not c.payload.get("archived")
+    ]
     class_lookup = {c.name.casefold(): c.id for c in classes}
     class_names = {c.id: c.name for c in classes}
     if data.classId and data.classId not in class_names:
@@ -394,7 +422,7 @@ def preview_import(
             if k in ("name", "roll", "section", "email", "phone", "guardian", "batch")
         }
         section = values.get("section") or data.section or class_names.get(data.classId, "")
-        class_id = class_lookup.get(section.casefold()) or data.classId
+        class_id = class_lookup.get(section.casefold()) if section else data.classId
         try:
             if not class_id or (mem.role == "teacher" and class_id not in mem.class_ids):
                 raise ValueError("Choose a class assigned to your account.")
@@ -479,3 +507,105 @@ def confirm_import(
     audit(db, school_id, user.id, "Confirmed transactional student import", **response)
     db.commit()
     return response
+
+
+class ReevaluateInput(BaseModel):
+    revision: int = Field(ge=1)
+    operationId: str = Field(min_length=8, max_length=120)
+    reason: str = Field(min_length=8, max_length=500)
+
+
+@router.post("/schools/{school_id}/exams/{exam_id}/reevaluate")
+def reevaluate(
+    school_id: str,
+    exam_id: str,
+    data: ReevaluateInput,
+    user: m.User = Depends(current_user),
+    db: Session = Depends(db_session),
+):
+    member = membership(db, user, school_id, "staff", "createExams")
+    exam = allowed_exam(db, school_id, member, exam_id, "scan")
+    request_hash = fingerprint({"examId": exam_id, **data.model_dump()})
+    previous = db.get(m.Operation, (school_id, data.operationId))
+    if previous:
+        if previous.user_id != user.id or previous.request_hash != request_hash:
+            raise HTTPException(409, "Operation ID already used for a different re-evaluation.")
+        return dict(previous.response, replayed=True)
+    revision = advance_revision(db, school_id, data.revision)
+    records = db.scalars(
+        select(m.ResultRecord).where(
+            m.ResultRecord.school_id == school_id,
+            m.ResultRecord.exam_id == exam_id,
+            m.ResultRecord.deleted_at.is_(None),
+        )
+    ).all()
+    count = 0
+    authorized_ids = (
+        set(
+            db.scalars(
+                select(m.Student.id).where(
+                    m.Student.school_id == school_id,
+                    m.Student.class_id.in_(member.class_ids),
+                    m.Student.deleted_at.is_(None),
+                )
+            )
+        )
+        if member.role == "teacher"
+        else None
+    )
+    for row in records:
+        if authorized_ids is not None and row.student_ref not in authorized_ids:
+            continue
+        outcome = evaluate(row.payload, exam.payload)
+        row.score, row.percentage, row.needs_review = outcome["score"], outcome["percentage"], outcome["needsReview"]
+        db.add(
+            m.Evaluation(
+                school_id=school_id,
+                result_id=row.id,
+                key_version=exam.key_version,
+                rule_version=outcome["ruleVersion"],
+                fingerprint=outcome["fingerprint"],
+                answers={
+                    "answers": row.payload["answers"],
+                    "detectedOptions": row.payload.get("detectedOptions"),
+                    "questionSet": row.payload.get("questionSet", "A"),
+                },
+                marking_rules={
+                    "rules": exam.payload.get("markingRules"),
+                    "key": exam.payload["answers"],
+                    "sets": exam.payload.get("questionSets", []),
+                    "correct": exam.payload["marksCorrect"],
+                    "negative": exam.payload["negativeMarks"],
+                    "reason": data.reason,
+                },
+                outcome=outcome,
+                actor_id=user.id,
+            )
+        )
+        count += 1
+    response = {"evaluated": count, "revision": revision, "keyVersion": exam.key_version}
+    db.add(
+        m.Operation(
+            school_id=school_id, id=data.operationId, user_id=user.id, request_hash=request_hash, response=response
+        )
+    )
+    audit(
+        db, school_id, user.id, "Explicitly re-evaluated authorized examination results", reason=data.reason, **response
+    )
+    db.commit()
+    return response
+
+
+@router.get("/schools/{school_id}/sync/log")
+def sync_log(school_id: str, user: m.User = Depends(current_user), db: Session = Depends(db_session)):
+    member = membership(db, user, school_id, "staff")
+    conditions = [m.Operation.school_id == school_id]
+    if member.role != "admin":
+        conditions.append(m.Operation.user_id == user.id)
+    rows = db.scalars(select(m.Operation).where(*conditions).order_by(m.Operation.created_at.desc()).limit(50))
+    return {
+        "operations": [
+            {"id": row.id, "createdAt": row.created_at.isoformat() + "Z", "revision": row.response.get("revision")}
+            for row in rows
+        ]
+    }

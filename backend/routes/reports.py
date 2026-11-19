@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import csv
 import io
 from html import escape
@@ -11,6 +12,7 @@ from reportlab.lib import colors, pagesizes
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.platypus import Image as ReportImage
 from reportlab.platypus import LongTable, Paragraph, SimpleDocTemplate, Spacer, TableStyle
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -97,8 +99,30 @@ def render_report(rows, title, school, format):
 
         doc.build(
             [
+                *(
+                    [
+                        ReportImage(
+                            io.BytesIO(base64.b64decode(school.settings["logo"].split(",", 1)[1])),
+                            width=90,
+                            height=45,
+                            kind="proportional",
+                        )
+                    ]
+                    if school.settings.get("logo")
+                    else []
+                ),
                 Paragraph(escape(school.name), styles["Title"]),
                 Paragraph(escape(school.address or ""), styles["Normal"]),
+                Paragraph(
+                    escape(
+                        " · ".join(
+                            str(school.settings.get(k, ""))
+                            for k in ("academicSession", "contactEmail", "contactPhone")
+                            if school.settings.get(k)
+                        )
+                    ),
+                    styles["Normal"],
+                ),
                 Spacer(1, 12),
                 Paragraph(escape(title), styles["Heading2"]),
                 Paragraph(
@@ -124,6 +148,7 @@ def report(
     examId: str,
     format: str = Query(default="pdf", pattern="^(csv|xlsx|pdf)$"),
     resultId: str | None = None,
+    section: str | None = Query(default=None, max_length=120),
     user: m.User = Depends(current_user),
     db: Session = Depends(db_session),
 ):
@@ -146,6 +171,8 @@ def report(
         membership(db, user, school_id, "staff", "reports")
         allowed_exam(db, school_id, member, examId)
         records = [r for r in load_workspace(db, school_id, member)["results"] if r["examId"] == examId]
+    if section:
+        records = [r for r in records if r["section"] == section]
     summary = analytics(records, exam.payload)
     title = f"{exam.title} — {kind.replace('-', ' ').title()}"
     if kind in ("results", "merit", "toppers", "class"):

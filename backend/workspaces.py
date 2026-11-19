@@ -89,6 +89,7 @@ def load_workspace(db, school_id, member=None):
         "teacher": school.teacher,
         "schools": [{"id": school.id, "name": school.name, "code": school.code, "address": school.address}],
         "activeSchoolId": school.id,
+        "institutionSettings": school.settings,
         "classes": classes,
         "students": students,
         "exams": exams,
@@ -119,7 +120,7 @@ def authorize_changes(old, incoming, member):
         return incoming
     if member.role != "teacher":
         raise HTTPException(403, "Students cannot modify the school workspace.")
-    for key in ("school", "teacher", "schools", "activeSchoolId"):
+    for key in ("school", "teacher", "schools", "activeSchoolId", "institutionSettings"):
         if canonical(old.get(key)) != canonical(incoming.get(key)):
             raise HTTPException(403, "Only administrators can change institution settings.")
     merged = copy.deepcopy(old)
@@ -285,15 +286,47 @@ def persist_workspace(db, school_id, value, actor_id=None):
         if not incoming or (obj.student_key, obj.exam_id) != (incoming["studentId"], incoming["examId"]):
             obj.deleted_at = obj.deleted_at or m.now()
     db.flush()
+    actor_membership = db.get(m.Membership, (actor_id, school_id)) if actor_id else None
+    linked_images = {}
+    for row in w["results"]:
+        for scan_id in row.get("scanIds", []):
+            if scan_id in linked_images and linked_images[scan_id] != row["id"]:
+                raise HTTPException(
+                    409,
+                    "An original sheet is already linked to another result. Explicitly correct the existing record instead of duplicating its evidence.",
+                )
+            linked_images[scan_id] = row["id"]
+    all_scan_ids = set(linked_images)
+    images = (
+        {obj.id: obj for obj in db.scalars(select(m.StoredObject).where(m.StoredObject.id.in_(all_scan_ids)))}
+        if all_scan_ids
+        else {}
+    )
     for row in w["results"]:
         exam = exams[row["examId"]]
         student = new_students.get(row["studentId"])
         if not student and not row.get("identityReview", False):
             raise HTTPException(400, "Unmatched student identities must remain in manual review.")
+        if student and exam.get("classIds") and student.get("classId") not in exam["classIds"]:
+            raise HTTPException(400, "This student is not in a class assigned to the examination.")
         if student and student["roll"].strip().casefold() != row["roll"].strip().casefold():
             raise HTTPException(400, "Result roll number does not match its registered student.")
         if exam.get("questionSets") and row.get("questionSet", "A") not in {s["code"] for s in exam["questionSets"]}:
             raise HTTPException(400, "Result question set is not configured for this examination.")
+        for scan_id in row.get("scanIds", []):
+            image = images.get(scan_id)
+            if not image or image.school_id != school_id or image.exam_id != row["examId"]:
+                raise HTTPException(
+                    400, "A linked original image is missing or belongs to another institution/examination."
+                )
+            if (
+                actor_membership
+                and actor_membership.role == "teacher"
+                and image.user_id != actor_id
+                and image.student_key != row["studentId"]
+            ):
+                raise HTTPException(403, "This unmatched original image is outside your assigned work.")
+            image.student_key = row["studentId"]
         obj = existing.get(row["id"])
         if (
             obj
@@ -379,7 +412,7 @@ def persist_workspace(db, school_id, value, actor_id=None):
                 else "blank",
             )
             detection.confidence, detection.coordinates = data.get("confidence"), data.get("coordinates", [])
-            detection.verified = bool(data.get("verified") or row["confirmed"])
+            detection.verified = bool(data.get("verified", row["confirmed"] if not data else False))
         for detection in detections.values():
             db.delete(detection)
     # Retain class rows referenced by historical student records; omit them from active views by payload flag.

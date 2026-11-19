@@ -89,7 +89,7 @@ def evaluate(result: dict, exam: dict):
         and not r.get("missingPagesAccepted", False)
     )
     unverified = any(
-        a["status"] in ("uncertain", "partial", "erased", "invalid") and not a["verified"]
+        a["status"] in ("uncertain", "partial", "erased", "invalid", "multiple") and not a["verified"]
         for a in r.get("answerMeta", [])
     )
     review = bool(
@@ -97,7 +97,9 @@ def evaluate(result: dict, exam: dict):
         or unknown_set
         or r.get("identityReview")
         or missing
-        or ((r["flagged"] or unverified or multi_review) and not r["confirmed"])
+        or r["flagged"]
+        or unverified
+        or (multi_review and not r["confirmed"])
     )
     grade = next(
         (

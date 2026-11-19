@@ -11,19 +11,13 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import type { Exam, Result, Workspace } from "./data";
-import {
-  downloadFile,
-  formatDate,
-  getStats,
-  gradeResult,
-  questionStats,
-  resultsCSV,
-} from "./data";
+import { downloadFile, formatDate, getStats, resultsCSV } from "./data";
 import { EmptyState, PageHeading, Select } from "./components";
 import { ExamBar } from "./Overview";
-import { questionCSV } from "./Analytics";
+import { questionCSV } from "./reportData";
 import { exportExcel, examPDF, studentPDF } from "./documents";
 import { downloadTemplatePDF } from "./omr";
+import ReportCatalogue from "./ReportCatalogue";
 interface Props {
   workspace: Workspace;
   exam: Exam;
@@ -311,6 +305,13 @@ export default function Reports({
           </div>
         </section>
       </div>
+      <ReportCatalogue
+        workspace={workspace}
+        exam={exam}
+        results={filtered}
+        section={section}
+        toast={toast}
+      />
       <p className="page-bottom-note">
         <ShieldCheck size={13} />
         Unverified results are marked provisional and excluded from averages,
@@ -318,97 +319,5 @@ export default function Reports({
         care.
       </p>
     </>
-  );
-}
-export function PrintReport({
-  workspace,
-  exam,
-  results,
-}: Pick<Props, "workspace" | "exam" | "results">) {
-  const stats = getStats(results, exam);
-  const difficult = questionStats(results, exam)
-    .sort((a, b) => a.percentage - b.percentage)
-    .slice(0, 5);
-  return (
-    <div className="print-report">
-      <header>
-        <strong>markly.</strong>
-        <span>{workspace.school}</span>
-      </header>
-      <h1>
-        {exam.subject} · {exam.title}
-      </h1>
-      <p>
-        {formatDate(exam.date)} · {exam.questions} questions ·{" "}
-        {exam.questions * exam.marksCorrect} marks · Pass mark{" "}
-        {exam.passPercentage}%
-      </p>
-      <div className="print-stats">
-        <div>
-          <strong>{stats.total}</strong>Students
-        </div>
-        <div>
-          <strong>{stats.evaluated}</strong>Evaluated
-        </div>
-        <div>
-          <strong>{stats.average.toFixed(1)}%</strong>Average score
-        </div>
-        <div>
-          <strong>{stats.passRate.toFixed(1)}%</strong>Pass rate
-        </div>
-      </div>
-      <h2>Questions to revisit</h2>
-      <p>
-        {difficult
-          .map(
-            (q) =>
-              `Q${q.number}: ${q.percentage.toFixed(0)}% correct (answer ${q.answer || "not set"})`,
-          )
-          .join(" · ")}
-      </p>
-      <h2>Student results</h2>
-      <table>
-        <thead>
-          <tr>
-            <th>Roll no.</th>
-            <th>Student</th>
-            <th>Class</th>
-            <th>Correct</th>
-            <th>Wrong</th>
-            <th>Blank</th>
-            <th>Score</th>
-            <th>Accuracy</th>
-            <th>Status</th>
-          </tr>
-        </thead>
-        <tbody>
-          {results.map((r) => {
-            const g = gradeResult(r, exam);
-            return (
-              <tr key={r.id}>
-                <td>{r.roll}</td>
-                <td>{r.name}</td>
-                <td>{r.section}</td>
-                <td>{g.correct}</td>
-                <td>{g.wrong}</td>
-                <td>{g.blank}</td>
-                <td>
-                  {g.score}/{g.maximum}
-                </td>
-                <td>{g.accuracy.toFixed(1)}%</td>
-                <td>{g.status}</td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-      <footer>
-        Generated with Markly · {stats.review} sheets awaiting review are
-        excluded from class averages and pass rates.{" "}
-        {results.some((r) => r.source === "demo")
-          ? "Includes sample data."
-          : ""}
-      </footer>
-    </div>
   );
 }

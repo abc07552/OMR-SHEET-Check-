@@ -209,7 +209,7 @@ export function pageCount(exam: Exam) {
 export function sheetSignature(exam: Exam): string {
   const l = getLayout(exam);
   const value = JSON.stringify([
-    !!exam.layout || exam.optionCount === 5 || exam.questions > 100,
+    !!exam.layout || (exam.optionCount || 4) !== 4 || exam.questions > 100,
     exam.questions,
     exam.optionCount || 4,
     l.questionsPerPage,

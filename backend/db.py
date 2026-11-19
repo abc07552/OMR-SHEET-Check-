@@ -10,6 +10,13 @@ from .config import ROOT, Settings
 
 
 def engine_for(settings: Settings):
+    if (
+        settings.database_url.startswith("sqlite:///")
+        and Path(settings.database_url.removeprefix("sqlite:///")).name == "markly.sqlite"
+    ):
+        raise ValueError(
+            "The preserved markly.sqlite is not an enterprise destination. Use a separate enterprise database or run the source-preserving migration."
+        )
     settings.data_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
     sqlite = settings.database_url.startswith("sqlite")
     options = (

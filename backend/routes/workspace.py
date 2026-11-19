@@ -71,6 +71,10 @@ def write_workspace(
     revision = advance_revision(db, school_id, data.revision)
     old = load_workspace(db, school_id)
     merged = authorize_changes(old, incoming, member)
+    if incoming.get("institutionSettings", old.get("institutionSettings")) != old.get("institutionSettings"):
+        raise HTTPException(
+            400, "Change institution preferences through the validated settings endpoint, not workspace JSON."
+        )
     last = db.scalar(
         select(m.RecoveryPoint)
         .where(m.RecoveryPoint.school_id == school_id, m.RecoveryPoint.automatic.is_(True))
@@ -107,7 +111,11 @@ def add_school(data: SchoolInput, user: m.User = Depends(current_user), db: Sess
 
 
 def valid_assignments(db, school_id, role, class_ids, student_id):
-    classes = set(db.scalars(select(m.Classroom.id).where(m.Classroom.school_id == school_id)))
+    classes = {
+        c.id
+        for c in db.scalars(select(m.Classroom).where(m.Classroom.school_id == school_id))
+        if not c.payload.get("archived")
+    }
     if set(class_ids) - classes:
         raise HTTPException(400, "One or more assigned classes do not belong to this school.")
     if role == "student":
@@ -420,7 +428,13 @@ def restore_backup(
     if workspace.activeSchoolId != school_id:
         raise HTTPException(403, "Recovery point belongs to another institution.")
     snapshot(db, request, school_id, "Before restore", False)
-    persist_workspace(db, school_id, workspace.model_dump(mode="json", by_alias=True, exclude_none=True), user.id)
+    restored = workspace.model_dump(mode="json", by_alias=True, exclude_none=True)
+    if "institutionSettings" in restored:
+        from .records import InstitutionSettings
+
+        preferences = InstitutionSettings.model_validate(dict(restored["institutionSettings"], revision=revision))
+        db.get(m.School, school_id).settings = preferences.model_dump(exclude={"revision"})
+    persist_workspace(db, school_id, restored, user.id)
     audit(db, school_id, user.id, "Restored encrypted recovery point", backupId=backup_id, revision=revision)
     db.commit()
     return {"ok": True, "revision": revision}

@@ -19,14 +19,24 @@ export function Logo({ small = false }: { small?: boolean }) {
       <span className="brand-symbol">
         <svg width="25" height="25" viewBox="0 0 32 32" fill="none">
           <path
-            d="M5 24V9h6l5 8 5-8h6v15h-5v-8l-6 9-6-9v8H5Z"
-            fill="currentColor"
+            d="M4 11V5h6m12 0h6v6m0 10v6h-6m-12 0H4v-6"
+            stroke="currentColor"
+            strokeWidth="2.4"
+            strokeLinecap="round"
           />
+          <circle
+            cx="16"
+            cy="16"
+            r="5"
+            stroke="currentColor"
+            strokeWidth="2.4"
+          />
+          <circle cx="16" cy="16" r="1.8" fill="currentColor" />
         </svg>
       </span>
       {!small && (
         <span>
-          markly<span className="brand-period">.</span>
+          omr<span className="brand-period">PRO</span>
         </span>
       )}
     </span>

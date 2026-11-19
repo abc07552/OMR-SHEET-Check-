@@ -22,7 +22,9 @@ import {
   Select,
 } from "./components";
 import Students from "./Students";
-import { importStudents, studentImportTemplate } from "./documents";
+import { studentImportTemplate } from "./documents";
+import StudentImport from "./StudentImport";
+import type { SaveStatus } from "./session";
 interface Props {
   workspace: Workspace;
   exam: Exam;
@@ -32,6 +34,8 @@ interface Props {
   onOpen: (r: Result) => void;
   onUpdate: (w: Workspace) => void;
   toast: (s: string) => void;
+  reload?: () => Promise<void>;
+  saveStatus?: SaveStatus;
 }
 export default function Roster(props: Props) {
   const { workspace, onUpdate, toast } = props;
@@ -42,8 +46,9 @@ export default function Roster(props: Props) {
     [editing, setEditing] = useState<Student | null | undefined>(undefined),
     [deleting, setDeleting] = useState<Student | null>(null),
     [profile, setProfile] = useState<Student | null>(null),
-    [importing, setImporting] = useState(false),
+    [importFile, setImportFile] = useState<File | null>(null),
     [issues, setIssues] = useState<string[] | null>(null);
+  const importing = !!importFile;
   const input = useRef<HTMLInputElement>(null),
     students = workspace.students || [],
     filtered = students
@@ -82,37 +87,33 @@ export default function Roster(props: Props) {
     );
   };
   const readImport = async (file: File) => {
-    setImporting(true);
-    try {
-      const data = await importStudents(file, workspace.activeSchoolId!);
-      const existing = new Set(students.map((s) => s.roll.toLowerCase())),
-        errors = [...data.errors];
-      const fresh = data.students
-        .filter((s) => {
-          if (existing.has(s.roll.toLowerCase())) {
-            errors.push(`Roll ${s.roll}: already registered; skipped.`);
-            return false;
-          }
-          return true;
-        })
-        .map((s) => ({
-          ...s,
-          classId: workspace.classes?.find((c) => c.name === s.section)?.id,
-        }));
-      onUpdate({ ...workspace, students: [...students, ...fresh] });
+    if (
+      props.saveStatus &&
+      props.saveStatus !== "saved" &&
+      props.saveStatus !== "queued"
+    ) {
       toast(
-        `${fresh.length} students imported. ${errors.length} rows skipped.`,
+        "Wait for current changes to save before previewing a transactional import.",
       );
-      if (errors.length) setIssues(errors);
-    } catch (e) {
-      toast(e instanceof Error ? e.message : "Import failed.");
-    } finally {
-      setImporting(false);
-      if (input.current) input.current.value = "";
+      return;
     }
+    setImportFile(file);
+    if (input.current) input.current.value = "";
   };
   return (
     <>
+      {importFile && (
+        <StudentImport
+          file={importFile}
+          workspace={workspace}
+          onClose={() => setImportFile(null)}
+          onLocalImport={(fresh) =>
+            onUpdate({ ...workspace, students: [...students, ...fresh] })
+          }
+          onServerImport={props.reload || (async () => {})}
+          toast={toast}
+        />
+      )}
       <div className="v2-tabs" aria-label="Student views">
         <button
           className={tab === "roster" ? "active" : ""}

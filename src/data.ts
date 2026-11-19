@@ -1,5 +1,6 @@
 import { isEmbeddedRaster, layoutErrors } from "./layout";
 import type { OMRLayout } from "./layout";
+import { scoreLocally, ScoringDecimal } from "./scoring";
 
 export type Option = "A" | "B" | "C" | "D" | "E";
 export const OPTIONS: Option[] = ["A", "B", "C", "D", "E"];
@@ -16,7 +17,42 @@ export type Page =
   | "templates"
   | "leaderboard"
   | "backups"
-  | "administration";
+  | "administration"
+  | "batches"
+  | "evaluation"
+  | "system";
+export interface MarkingRules {
+  version: number;
+  partialMarks: number;
+  unansweredMarks: number;
+  multiplePolicy: "review" | "wrong" | "partial" | "exact";
+  floorZero: boolean;
+  grades: { name: string; min: number }[];
+}
+export interface AnswerDetection {
+  question: number;
+  selected: Option[];
+  status:
+    | "blank"
+    | "filled"
+    | "partial"
+    | "erased"
+    | "multiple"
+    | "uncertain"
+    | "invalid"
+    | "manual";
+  confidence?: number;
+  coordinates: {
+    option?: Option;
+    x?: number;
+    y?: number;
+    alignedX?: number;
+    alignedY?: number;
+    radius?: number;
+    inkRatio?: number;
+  }[];
+  verified: boolean;
+}
 export interface SubjectRange {
   name: string;
   from: number;
@@ -45,10 +81,18 @@ export interface Student {
   phone?: string;
   guardian?: string;
   registeredAt: string;
+  batch?: string;
+  photo?: string;
 }
 export interface Exam {
   schoolId?: string;
-  optionCount?: 4 | 5;
+  optionCount?: 2 | 3 | 4 | 5;
+  code?: string;
+  batch?: string;
+  resultsPublished?: boolean;
+  keyVersion?: number;
+  markingRules?: MarkingRules;
+  questionSets?: { code: string; answers: (Option[] | null)[] }[];
   subjects?: SubjectRange[];
   layout?: OMRLayout;
   duration?: number;
@@ -81,8 +125,17 @@ export interface Result {
   layoutSignature?: string;
   identityReview?: boolean;
   missingPagesAccepted?: boolean;
-  engine?: "opencv" | "canvas";
+  engine?: "opencv" | "canvas" | "opencv-python";
   scanConfidence?: number;
+  questionSet?: string;
+  detectedOptions?: Option[][];
+  answerMeta?: AnswerDetection[];
+  scanIds?: string[];
+  sourceTransforms?: {
+    objectId: string;
+    pageIndex: number;
+    sourceToAligned: number[][];
+  }[];
 }
 export interface Workspace {
   version: 1;
@@ -94,6 +147,16 @@ export interface Workspace {
   classes?: ClassRoom[];
   students?: Student[];
   activeSchoolId?: string;
+  institutionSettings?: {
+    logo?: string;
+    academicSession?: string;
+    contactEmail?: string;
+    contactPhone?: string;
+    notifications?: boolean;
+    defaultNegativeMarks?: number;
+    defaultPassPercentage?: number;
+    theme?: string;
+  };
 }
 
 function seeded(seed: number) {
@@ -252,7 +315,6 @@ export function isValidWorkspace(value: unknown): value is Workspace {
     typeof v.school !== "string" ||
     typeof v.teacher !== "string" ||
     !Array.isArray(v.exams) ||
-    !v.exams.length ||
     !Array.isArray(v.results)
   )
     return false;
@@ -290,14 +352,12 @@ export function isValidWorkspace(value: unknown): value is Workspace {
   if (
     v.exams.some(
       (e) =>
-        e.optionCount !== undefined &&
-        e.optionCount !== 4 &&
-        e.optionCount !== 5,
+        e.optionCount !== undefined && ![2, 3, 4, 5].includes(e.optionCount),
     )
   )
     return false;
   if (
-    v.exams.some((e) => (e.optionCount || 4) === 4 && e.answers.includes("E"))
+    v.exams.some((e) => e.answers.some((a) => a && !getOptions(e).includes(a)))
   )
     return false;
   if (
@@ -402,7 +462,7 @@ export function isValidWorkspace(value: unknown): value is Workspace {
         typeof r.roll === "string" &&
         typeof r.section === "string" &&
         validAnswers(r.answers, exam.questions) &&
-        !((exam.optionCount || 4) === 4 && r.answers.includes("E")) &&
+        !r.answers.some((a) => a && !getOptions(exam).includes(a)) &&
         (r.pageTotal === undefined ||
           (Number.isInteger(r.pageTotal) &&
             r.pageTotal >= 1 &&
@@ -453,55 +513,7 @@ export function loadWorkspace(): Workspace {
   return createAdvancedDemo();
 }
 export function gradeResult(result: Result, exam: Exam) {
-  let correct = 0,
-    wrong = 0,
-    blank = 0;
-  exam.answers.forEach((key, i) => {
-    if (!key) return;
-    if (!result.answers[i]) blank++;
-    else if (result.answers[i] === key) correct++;
-    else wrong++;
-  });
-  const maximum = exam.answers.filter(Boolean).length * exam.marksCorrect;
-  const score = Math.max(
-    0,
-    correct * exam.marksCorrect - wrong * exam.negativeMarks,
-  );
-  const percentage = maximum ? (score / maximum) * 100 : 0;
-  const accuracy =
-    correct + wrong + blank ? (correct / (correct + wrong + blank)) * 100 : 0;
-  const expectedPages =
-    result.pageTotal ||
-    Math.ceil(
-      exam.questions /
-        (exam.layout?.questionsPerPage || Math.min(100, exam.questions)),
-    );
-  const missingPages =
-    expectedPages > 1 &&
-    new Set(result.pageIndices || []).size < expectedPages &&
-    !result.missingPagesAccepted;
-  const needsReview =
-    !exam.published ||
-    (result.flagged.length > 0 && !result.confirmed) ||
-    !!result.identityReview ||
-    missingPages;
-  const status: "Review" | "Passed" | "Failed" = needsReview
-    ? "Review"
-    : percentage >= exam.passPercentage
-      ? "Passed"
-      : "Failed";
-  return {
-    correct,
-    wrong,
-    blank,
-    maximum,
-    score,
-    percentage,
-    accuracy,
-    status,
-    needsReview,
-    missingPages,
-  };
+  return scoreLocally(result, exam);
 }
 export function getStats(results: Result[], exam: Exam) {
   const scored = results.map((r) => gradeResult(r, exam));
@@ -547,15 +559,18 @@ export function getDistribution(results: Result[], exam: Exam) {
   }));
 }
 export function questionStats(results: Result[], exam: Exam) {
-  const valid = results.filter((r) => !gradeResult(r, exam).needsReview);
+  const valid = results
+    .map((r) => gradeResult(r, exam))
+    .filter((g) => !g.needsReview);
   return exam.answers.map((answer, i) => {
     const counts = getOptions(exam).map((option) => ({
       option,
-      count: valid.filter((r) => r.answers[i] === option).length,
+      count: valid.filter((g) => g.questions[i]?.selected.includes(option))
+        .length,
     }));
-    const correct = answer
-      ? valid.filter((r) => r.answers[i] === answer).length
-      : 0;
+    const correct = valid.filter(
+      (g) => g.questions[i]?.status === "correct",
+    ).length;
     return {
       number: i + 1,
       answer,
@@ -563,7 +578,7 @@ export function questionStats(results: Result[], exam: Exam) {
       correct,
       total: valid.length,
       percentage: valid.length ? (correct / valid.length) * 100 : 0,
-      blank: valid.filter((r) => !r.answers[i]).length,
+      blank: valid.filter((g) => !g.questions[i]?.selected.length).length,
     };
   });
 }
@@ -716,7 +731,8 @@ export function enrichWorkspace(input: Workspace): Workspace {
   const exams = input.exams.map((e) => ({
     ...e,
     schoolId: e.schoolId || id,
-    optionCount: e.optionCount || ((e.answers.includes("E") ? 5 : 4) as 4 | 5),
+    optionCount:
+      e.optionCount || ((e.answers.includes("E") ? 5 : 4) as 2 | 3 | 4 | 5),
   }));
   const classes =
     input.classes ||
@@ -849,39 +865,40 @@ export function subjectStats(results: Result[], exam: Exam) {
   const subjects = exam.subjects?.length
     ? exam.subjects
     : [{ name: exam.subject, from: 1, to: exam.questions }];
-  const valid = results.filter((r) => !gradeResult(r, exam).needsReview);
+  const valid = results
+    .map((result) => ({ result, graded: gradeResult(result, exam) }))
+    .filter((r) => !r.graded.needsReview);
   return subjects.map((subject) => {
-    const max = (subject.to - subject.from + 1) * exam.marksCorrect;
-    const students = valid.map((r) => {
-      let correct = 0,
-        wrong = 0;
-      for (let q = subject.from - 1; q < subject.to; q++) {
-        if (r.answers[q] && exam.answers[q]) {
-          if (r.answers[q] === exam.answers[q]) correct++;
-          else wrong++;
-        }
-      }
-      const score = Math.max(
-        0,
-        correct * exam.marksCorrect - wrong * exam.negativeMarks,
-      );
+    const students = valid.map(({ result, graded }) => {
+      const qs = graded.questions.slice(subject.from - 1, subject.to),
+        maximum = new ScoringDecimal(exam.marksCorrect)
+          .times(qs.filter((q) => q.expected.length).length)
+          .toNumber();
+      const total = qs.reduce((n, q) => n.plus(q.marks), new ScoringDecimal(0));
+      const score = total.toNumber();
       return {
-        result: r,
-        correct,
-        wrong,
+        result,
         score,
-        percentage: max ? (score / max) * 100 : 0,
+        correct: qs.filter((q) => q.status === "correct").length,
+        wrong: qs.filter((q) => q.status === "wrong").length,
+        maximum,
+        percentage: maximum ? total.div(maximum).times(100).toNumber() : 0,
       };
     });
+    const key = (
+      exam.questionSets?.[0]?.answers ||
+      exam.answers.map((a) => (a ? [a] : null))
+    ).slice(subject.from - 1, subject.to);
+    const maximum = key.filter((a) => a?.length).length * exam.marksCorrect;
     return {
       ...subject,
-      maximum: max,
+      maximum,
       students,
       average: students.length
-        ? students.reduce((s, r) => s + r.percentage, 0) / students.length
+        ? students.reduce((n, r) => n + r.percentage, 0) / students.length
         : 0,
       accuracy: valid.length
-        ? (students.reduce((s, r) => s + r.correct, 0) /
+        ? (students.reduce((n, r) => n + r.correct, 0) /
             (valid.length * (subject.to - subject.from + 1))) *
           100
         : 0,
@@ -907,20 +924,29 @@ export function rankings(results: Result[], exam: Exam, subject?: string) {
     .sort(
       (a, b) => b.score - a.score || a.result.name.localeCompare(b.result.name),
     );
-  const groups = new Map<number, { rank: number; percentile: number }>();
-  for (let first = 0; first < items.length;) {
-    let last = first + 1;
-    while (last < items.length && items[last].score === items[first].score)
-      last++;
-    groups.set(items[first].score, {
-      rank: first + 1,
-      percentile: ((items.length - last) / items.length) * 100,
-    });
-    first = last;
-  }
+  const groups = new Map<number, number>();
+  items.forEach((item, i) => {
+    if (!groups.has(item.score)) groups.set(item.score, i + 1);
+  });
+  const percentages = items
+    .map((item) => item.percentage)
+    .sort((a, b) => a - b);
+  const below = (percentage: number) => {
+    let lo = 0,
+      hi = percentages.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (percentages[mid] < percentage) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  };
   return items.map((item, i) => ({
     ...item,
-    ...groups.get(item.score)!,
+    rank: groups.get(item.score)!,
+    percentile: items.length
+      ? (below(item.percentage) / items.length) * 100
+      : 0,
     position: i + 1,
   }));
 }
@@ -931,6 +957,12 @@ export function studentValidation(
 ) {
   if (!student.name.trim() || !student.roll.trim() || !student.section.trim())
     return "Name, roll number and class are required.";
+  if (
+    student.name.length > 120 ||
+    student.roll.length > 40 ||
+    student.section.length > 120
+  )
+    return "Use at most 120 characters for name/class and 40 for the roll number.";
   if (
     students.some(
       (s) =>

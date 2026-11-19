@@ -18,7 +18,7 @@ export async function exportExcel(
 ) {
   const { default: ExcelJS } = await import("exceljs");
   const book = new ExcelJS.Workbook();
-  book.creator = "Markly";
+  book.creator = "ULTIMATE OMR CHECKER AI PRO";
   book.created = new Date();
   const sheet = book.addWorksheet("Student results");
   sheet.addRow([
@@ -280,10 +280,12 @@ async function pdfFont() {
     }
   })());
 }
-async function makePDF() {
+export async function makePDF(
+  orientation: "portrait" | "landscape" = "portrait",
+) {
   const { jsPDF } = await import("jspdf");
   const doc = new jsPDF({
-    orientation: "portrait",
+    orientation,
     unit: "mm",
     format: "a4",
     compress: true,
@@ -310,8 +312,18 @@ export async function studentPDF(
   doc.setFillColor("#15251f");
   doc.rect(0, 0, 210, 49, "F");
   doc.setTextColor("#c6ed96");
+  if (workspace.institutionSettings?.logo)
+    doc.addImage(
+      workspace.institutionSettings.logo,
+      165,
+      9,
+      30,
+      23,
+      undefined,
+      "FAST",
+    );
   doc.setFontSize(22);
-  doc.text("markly.", 15, 17);
+  doc.text("OMR PRO", 15, 17);
   doc.setTextColor("#ffffff");
   doc.setFontSize(10);
   doc.text(workspace.school, 15, 27);
@@ -379,19 +391,13 @@ export async function studentPDF(
     head: [
       ["Question", "Subject", "Correct option", "Student answer", "Outcome"],
     ],
-    body: exam.answers.map((a, q) => [
+    body: g.questions.map((outcome, q) => [
       q + 1,
       exam.subjects?.find((s) => q + 1 >= s.from && q + 1 <= s.to)?.name ||
         exam.subject,
-      a || "Not set",
-      result.answers[q] || "Unanswered",
-      result.flagged.includes(q)
-        ? "Review"
-        : !result.answers[q]
-          ? "Unanswered"
-          : result.answers[q] === a
-            ? "Correct"
-            : "Incorrect",
+      outcome.expected.join(", ") || "Not set",
+      outcome.selected.join(", ") || "Unanswered",
+      result.flagged.includes(q) ? "Review" : outcome.status,
     ]),
     styles: { font, fontSize: 7, cellPadding: 2 },
     headStyles: { fillColor: [47, 76, 56] },
@@ -403,7 +409,7 @@ export async function studentPDF(
     doc.setFontSize(6.5);
     doc.setTextColor("#8b987f");
     doc.text(
-      `Markly | ${result.roll} | Page ${p} of ${pages} | Percentile: percentage of evaluated students with a strictly lower score.`,
+      `OMR PRO | ${result.roll} | Page ${p} of ${pages} | Percentile: percentage of evaluated students with a strictly lower score.`,
       15,
       289,
     );
@@ -421,9 +427,19 @@ export async function examPDF(
     s = getStats(results, exam);
   doc.setFontSize(23);
   doc.setTextColor("#305739");
-  doc.text("markly. / Examination report", 15, 23);
+  doc.text("OMR PRO / Examination report", 15, 23);
   doc.setFontSize(10);
   doc.text(workspace.school, 15, 33);
+  if (workspace.institutionSettings?.logo)
+    doc.addImage(
+      workspace.institutionSettings.logo,
+      167,
+      10,
+      28,
+      20,
+      undefined,
+      "FAST",
+    );
   doc.text(`${exam.title} · ${formatDate(exam.date)}`, 15, 42);
   doc.text(
     `Students ${s.total}   Evaluated ${s.evaluated}   Average ${s.average.toFixed(1)}%   Pass rate ${s.passRate.toFixed(1)}%`,

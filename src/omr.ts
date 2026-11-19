@@ -1,6 +1,6 @@
 import QRCode from "qrcode";
 import { OPTIONS, getOptions } from "./data";
-import type { Exam, Option } from "./data";
+import type { AnswerDetection, Exam, Option } from "./data";
 import {
   DEFAULT_ANCHORS,
   getLayout,
@@ -46,7 +46,7 @@ export function bubbleLayout(question: number, count: number, optionCount = 4) {
   };
 }
 const isModern = (exam: Exam) =>
-  !!exam.layout || exam.optionCount === 5 || exam.questions > 100;
+  !!exam.layout || (exam.optionCount || 4) !== 4 || exam.questions > 100;
 export function questionPosition(q: number, exam: Exam, page = 0) {
   return isModern(exam)
     ? layoutBubble(q, exam)
@@ -463,7 +463,9 @@ function sampleBubbles(
 ) {
   const answers: (Option | null)[] = [],
     flagged: number[] = [],
-    confidences: number[] = [];
+    confidences: number[] = [],
+    answerMeta: AnswerDetection[] = [],
+    detectedOptions: Option[][] = [];
   for (let q = 0; q < pageQuestionCount(exam, page); q++) {
     const l = questionPosition(q, exam, page),
       darkness = l.xs.map((x) => {
@@ -485,21 +487,53 @@ function sampleBubbles(
           }
         return total ? dark / total : 0;
       });
+    const threshold = exam.layout?.threshold || 0.52;
     const filled = darkness
       .map((v, i) => ({ v, i }))
-      .filter((a) => a.v >= (exam.layout?.threshold || 0.52));
-    if (filled.length === 1) {
-      answers.push(getOptions(exam)[filled[0].i]);
-      confidences.push(filled[0].v);
-    } else {
-      answers.push(null);
-      confidences.push(filled.length ? 0 : 1 - Math.max(...darkness));
-      if (filled.length > 1 || darkness.some((v) => v > 0.22)) flagged.push(q);
-    }
+      .filter((a) => a.v >= threshold);
+    const selected = filled.map((f) => getOptions(exam)[f.i]);
+    const maximum = Math.max(...darkness),
+      others = darkness.filter((_, i) => i !== filled[0]?.i);
+    let status: AnswerDetection["status"] = "blank";
+    if (filled.length > 1) status = "multiple";
+    else if (filled.length === 1)
+      status =
+        maximum < threshold + 0.12 || others.some((v) => v > 0.22)
+          ? "uncertain"
+          : "filled";
+    else if (maximum > 0.32) status = "partial";
+    else if (maximum > 0.22) status = "erased";
+    if (status !== "blank" && status !== "filled") flagged.push(q);
+    const confidence =
+      filled.length === 1
+        ? Math.max(0, maximum - Math.max(0, ...others))
+        : filled.length
+          ? 0
+          : 1 - maximum;
+    answers.push(filled.length === 1 ? selected[0] : null);
+    confidences.push(confidence);
+    detectedOptions.push(selected);
+    answerMeta.push({
+      question: q,
+      selected,
+      status,
+      confidence: confidence * 100,
+      verified: false,
+      coordinates: l.xs.map((x, i) => ({
+        ...map(x, l.y),
+        alignedX: x,
+        alignedY: l.y,
+        radius: l.radius,
+        option: getOptions(exam)[i],
+        inkRatio: darkness[i],
+      })),
+    });
   }
   return {
     answers,
     flagged,
+    answerMeta,
+    detectedOptions,
     confidence: confidences.length
       ? (confidences.reduce((s, v) => s + v, 0) / confidences.length) * 100
       : 0,
@@ -508,10 +542,13 @@ function sampleBubbles(
 export function analyzeAlignedImageData(data: ImageData, exam: Exam, page = 0) {
   return sampleBubbles(data, exam, page, (x, y) => ({ x, y }));
 }
-export function analyzeImageData(data: ImageData, exam: Exam, page = 0) {
+export function analyzeImageEvidence(data: ImageData, exam: Exam, page = 0) {
   const markers = findMarkers(data, exam.layout?.anchors || MARKERS),
     map = perspectiveTransform(exam.layout?.anchors || MARKERS, markers);
-  const { answers, flagged } = sampleBubbles(data, exam, page, map);
+  return sampleBubbles(data, exam, page, map);
+}
+export function analyzeImageData(data: ImageData, exam: Exam, page = 0) {
+  const { answers, flagged } = analyzeImageEvidence(data, exam, page);
   return { answers, flagged };
 }
 export async function scanFile(file: File, exam: Exam, page = 0) {

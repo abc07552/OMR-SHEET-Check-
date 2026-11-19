@@ -24,6 +24,8 @@ import { getOptions } from "./data";
 import { getLayout, pageCount, sheetSignature } from "./layout";
 import { createSheet, downloadTemplatePDF, templatePDF } from "./omr";
 import { pdfImages, scanPageFile } from "./scanEngine";
+import type { ScannedPage } from "./scanEngine";
+import { api, useSession } from "./session";
 import { Modal, PageHeading, ResultsTable, Select } from "./components";
 import { ExamBar } from "./Overview";
 interface QueueItem {
@@ -60,13 +62,18 @@ export default function Scanner({
   toast,
   onBusy,
 }: Props) {
+  const session = useSession(),
+    connected =
+      session.phase === "authenticated" &&
+      session.backend === "fastapi" &&
+      !session.offline;
   const [queue, setQueue] = useState<QueueItem[]>([]),
     [busy, setBusy] = useState(false),
     [rendering, setRendering] = useState(false),
     [stage, setStage] = useState(""),
     [section, setSection] = useState(workspace.classes?.[0]?.name || "12 A"),
     [ocr, setOCR] = useState(true),
-    [engine, setEngine] = useState<"opencv" | "canvas">("opencv"),
+    [engine, setEngine] = useState<"opencv" | "opencv-python">("opencv"),
     [replace, setReplace] = useState(false),
     [dragging, setDragging] = useState(false),
     [camera, setCamera] = useState(false),
@@ -207,12 +214,29 @@ export default function Scanner({
         if (cancel.current) break;
         patch(item.id, { status: "scanning", error: undefined });
         try {
-          const read = await scanPageFile(item.file, exam, {
-            pageIndex: item.pageIndex,
-            ocr: ocr && engine === "opencv",
-            engine,
-            onStage: setStage,
-          });
+          let read: ScannedPage;
+          if (engine === "opencv-python") {
+            if (!connected)
+              throw new Error(
+                "The native engine needs an authenticated FastAPI connection. Choose OpenCV.js for offline scanning.",
+              );
+            setStage("Reading on the native OpenCV server…");
+            const form = new FormData();
+            form.append("file", item.file);
+            form.append("pageIndex", String(item.pageIndex));
+            form.append("ocr", String(ocr));
+            form.append("operationId", `scan-${item.id}`);
+            read = await api<ScannedPage>(
+              `/schools/${workspace.activeSchoolId}/exams/${exam.id}/scan`,
+              { method: "POST", body: form },
+            );
+          } else
+            read = await scanPageFile(item.file, exam, {
+              pageIndex: item.pageIndex,
+              ocr,
+              engine: "opencv",
+              onStage: setStage,
+            });
           const entered = item.roll.trim(),
             detected = read.roll.trim();
           if (
@@ -274,6 +298,50 @@ export default function Scanner({
               pageIndices: [],
               pageTotal: pageCount(exam),
             };
+          if (
+            result.questionSet &&
+            result.questionSet !== (read.questionSet || "A")
+          )
+            throw new Error(
+              "Question-set mismatch between this page and the student's saved pages. Verify the set before replacing a page.",
+            );
+          const { retainOriginal, uploadOriginal } =
+            await import("./scanArchive");
+          let objectId = read.objectId;
+          if (!objectId) {
+            if (connected)
+              objectId = await uploadOriginal(
+                workspace.activeSchoolId!,
+                exam.id,
+                item.file,
+                `upload-${item.id}`,
+              );
+            else {
+              if (
+                session.phase === "authenticated" &&
+                session.backend !== "fastapi"
+              )
+                toast(
+                  "Legacy Node scanning: originals are not archived by this service. Migrate to FastAPI for encrypted evidence retention.",
+                );
+              else {
+                objectId = `local-${item.id}`;
+                await retainOriginal(
+                  objectId,
+                  item.file,
+                  session.phase === "authenticated",
+                );
+              }
+            }
+          }
+          const detectedOptions = (
+            result.detectedOptions || result.answers.map((a) => (a ? [a] : []))
+          ).map((a) => [...a]);
+          (
+            read.detectedOptions || read.answers.map((a) => (a ? [a] : []))
+          ).forEach((a, q) => {
+            detectedOptions[offset + q] = a;
+          });
           const answers = [...result.answers];
           read.answers.forEach((a, q) => {
             answers[offset + q] = a;
@@ -284,6 +352,39 @@ export default function Scanner({
             createdAt: new Date().toISOString(),
             layoutSignature: sheetSignature(exam),
             answers,
+            detectedOptions,
+            answerMeta: [
+              ...(result.answerMeta || []).filter(
+                (m) =>
+                  m.question < offset ||
+                  m.question >= offset + read.answers.length,
+              ),
+              ...(read.answerMeta || []).map((m) => ({
+                ...m,
+                question: m.question + offset,
+              })),
+            ],
+            scanIds: [
+              ...new Set([
+                ...(result.scanIds || []),
+                ...(objectId ? [objectId] : []),
+              ]),
+            ],
+            sourceTransforms: [
+              ...(result.sourceTransforms || []).filter(
+                (t) => t.pageIndex !== p,
+              ),
+              ...(read.sourceToAligned && objectId
+                ? [
+                    {
+                      objectId,
+                      pageIndex: p,
+                      sourceToAligned: read.sourceToAligned,
+                    },
+                  ]
+                : []),
+            ],
+            questionSet: read.questionSet || "A",
             flagged: [
               ...result.flagged.filter(
                 (q) => q < offset || q >= offset + read.answers.length,
@@ -314,6 +415,7 @@ export default function Scanner({
             confidence: read.confidence,
             resultId: result.id,
           });
+          if (read.warnings?.length) toast(read.warnings.join(" "));
           processed++;
         } catch (e) {
           patch(item.id, {
@@ -598,8 +700,8 @@ export default function Scanner({
                   disabled={busy || rendering}
                 >
                   <option value="opencv">OpenCV · perspective alignment</option>
-                  <option value="canvas">
-                    Lightweight · registration markers
+                  <option value="opencv-python" disabled={!connected}>
+                    Native Python OpenCV · online server
                   </option>
                 </Select>
               </label>
@@ -607,7 +709,7 @@ export default function Scanner({
                 <input
                   type="checkbox"
                   checked={ocr}
-                  disabled={busy || rendering || engine === "canvas"}
+                  disabled={busy || rendering}
                   onChange={(e) => setOCR(e.target.checked)}
                 />
                 Read roll numbers with OCR

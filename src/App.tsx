@@ -42,6 +42,7 @@ import {
   X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { useLocation, useNavigate } from "react-router-dom";
 import type { Exam, Page, Result, School, Workspace } from "./data";
 import {
   blankWorkspace,
@@ -66,7 +67,8 @@ import Auth from "./Auth";
 import Dashboard from "./Dashboard";
 import AnswerKeys, { NewExamModal } from "./AnswerKeys";
 import { StudentDetail } from "./Students";
-import { PrintReport } from "./Reports";
+import PrintReport from "./PrintReport";
+import ResetAccount from "./AccountAccess";
 const Scanner = lazy(() => import("./Scanner")),
   Roster = lazy(() => import("./Roster")),
   Analytics = lazy(() => import("./Analytics")),
@@ -75,11 +77,17 @@ const Scanner = lazy(() => import("./Scanner")),
   Leaderboard = lazy(() => import("./Leaderboard")),
   Settings = lazy(() => import("./Settings")),
   Backups = lazy(() => import("./Backups")),
-  Administration = lazy(() => import("./Administration"));
+  Administration = lazy(() => import("./Administration")),
+  StudentPortal = lazy(() => import("./StudentPortal")),
+  BatchCenter = lazy(() => import("./BatchCenter")),
+  EvaluationCenter = lazy(() => import("./EvaluationCenter")),
+  SystemCenter = lazy(() => import("./SystemCenter"));
 const pages: { id: Page; label: string; icon: LucideIcon; group: number }[] = [
   { id: "overview", label: "Overview", icon: LayoutDashboard, group: 0 },
   { id: "scanner", label: "Scan sheets", icon: ScanLine, group: 0 },
+  { id: "batches", label: "Bulk queue", icon: BookOpen, group: 0 },
   { id: "keys", label: "Answer keys", icon: KeyRound, group: 0 },
+  { id: "evaluation", label: "Evaluation policy", icon: ShieldCheck, group: 0 },
   { id: "templates", label: "Layout studio", icon: ScanLine, group: 0 },
   { id: "students", label: "Students", icon: Users, group: 0 },
   {
@@ -98,11 +106,24 @@ const pages: { id: Page; label: string; icon: LucideIcon; group: number }[] = [
   { id: "backups", label: "Backups", icon: DatabaseBackup, group: 2 },
   { id: "administration", label: "Team & access", icon: ShieldCheck, group: 2 },
   { id: "settings", label: "Settings", icon: Settings2, group: 2 },
+  { id: "system", label: "Sync & system", icon: Cloud, group: 2 },
 ];
 const hashPage = (): Page =>
-  pages.find((p) => p.id === location.hash.slice(1))?.id || "overview";
+  pages.find((p) => p.id === location.hash.replace(/^#\/?/, "").split("?")[0])
+    ?.id || "overview";
 export default function App() {
-  const session = useSession();
+  const session = useSession(),
+    route = useLocation();
+  if (route.pathname === "/reset")
+    return (
+      <Suspense
+        fallback={
+          <div className="initial-loader">Opening secure recovery…</div>
+        }
+      >
+        <ResetAccount />
+      </Suspense>
+    );
   if (session.phase === "checking")
     return (
       <div className="initial-loader">
@@ -112,9 +133,48 @@ export default function App() {
       </div>
     );
   if (session.phase === "login" || session.phase === "setup") return <Auth />;
-  return <WorkspaceApp key={session.phase} />;
+  if (session.phase === "authenticated" && !session.user?.memberships.length)
+    return (
+      <div className="initial-loader">
+        <Logo />
+        <h1>No active institution membership.</h1>
+        <p>
+          Your account has no authorized school workspace. Ask your
+          administrator to restore access.
+        </p>
+        <button
+          className="button button-primary"
+          onClick={() => session.logout()}
+        >
+          Sign out
+        </button>
+      </div>
+    );
+  if (
+    session.user?.memberships.find((m) => m.schoolId === session.activeSchool)
+      ?.role === "student"
+  )
+    return (
+      <Suspense
+        fallback={
+          <div className="initial-loader">
+            <Logo />
+            Opening private student space…
+          </div>
+        }
+      >
+        <StudentPortal key={`${session.user.id}-${session.activeSchool}`} />
+      </Suspense>
+    );
+  return (
+    <WorkspaceApp
+      key={`${session.phase}-${session.user?.id || "device"}-${session.vaultEpoch}`}
+    />
+  );
 }
 function WorkspaceApp() {
+  const routerNavigate = useNavigate(),
+    route = useLocation();
   const session = useSession(),
     store = useWorkspaceStore(),
     { workspace: full, setWorkspace, cloud, status } = store;
@@ -165,23 +225,22 @@ function WorkspaceApp() {
       return;
     }
     setPage(p);
-    location.hash = p;
+    routerNavigate(`/${p}`);
     setMobile(false);
     setProfile(false);
     setNotifications(false);
     window.scrollTo({ top: 0, behavior: "instant" });
   };
   useEffect(() => {
-    const listener = () => {
-      if (scanBusy) {
-        location.hash = page;
-        return;
-      }
-      setPage(hashPage());
-    };
-    window.addEventListener("hashchange", listener);
-    return () => window.removeEventListener("hashchange", listener);
-  }, [scanBusy, page]);
+    const next =
+      pages.find((p) => p.id === route.pathname.replace(/^\//, ""))?.id ||
+      hashPage();
+    if (scanBusy && next !== page) {
+      routerNavigate(`/${page}`, { replace: true });
+      return;
+    }
+    setPage(next);
+  }, [route.pathname, scanBusy]);
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
@@ -193,7 +252,7 @@ function WorkspaceApp() {
     return () => document.removeEventListener("keydown", key);
   }, []);
   useEffect(() => {
-    document.title = `${pages.find((p) => p.id === page)?.label || "Overview"} — Markly`;
+    document.title = `${pages.find((p) => p.id === page)?.label || "Overview"} — ULTIMATE OMR CHECKER AI PRO`;
   }, [page]);
   useEffect(() => {
     setStudentId(null);
@@ -207,12 +266,52 @@ function WorkspaceApp() {
         schoolId,
       ),
     );
-  const updateExam = (e: Exam) =>
+  const member = session.user?.memberships.find((m) => m.schoolId === schoolId);
+  const allowedPage = (p: Page) => {
+    if (!cloud || admin) return true;
+    if (p === "administration" || p === "backups") return false;
+    if (
+      ["scanner", "batches"].includes(p) &&
+      member?.permissions?.scan === false
+    )
+      return false;
+    if (
+      ["keys", "templates", "evaluation"].includes(p) &&
+      member?.permissions?.createExams === false
+    )
+      return false;
+    if (
+      ["analytics", "leaderboard", "reports"].includes(p) &&
+      member?.permissions?.reports === false
+    )
+      return false;
+    return true;
+  };
+  const updateExam = (e: Exam) => {
+    if (!allowedPage("keys")) {
+      toast("Your account cannot change examinations or answer keys.");
+      return;
+    }
     updateScoped({
       ...workspace,
       exams: workspace.exams.map((old) => (old.id === e.id ? e : old)),
     });
+  };
   const createExam = (e: Exam) => {
+    e = {
+      ...e,
+      negativeMarks:
+        workspace.institutionSettings?.defaultNegativeMarks ?? e.negativeMarks,
+      passPercentage:
+        workspace.institutionSettings?.defaultPassPercentage ??
+        e.passPercentage,
+    };
+    if (!allowedPage("keys")) {
+      toast("Your account cannot create examinations.");
+      return;
+    }
+    if (cloud && !admin && !e.classIds?.length)
+      e = { ...e, classIds: member?.classIds || [] };
     updateScoped({
       ...workspace,
       exams: [...workspace.exams, { ...e, schoolId }],
@@ -226,7 +325,7 @@ function WorkspaceApp() {
     toast(`${results.length} result records exported.`);
   };
   const switchSchool = (id: string) => {
-    if (scanBusy || status === "saving") {
+    if (scanBusy || status === "saving" || status === "queued") {
       toast("Wait for scanning and saving to finish before switching schools.");
       return;
     }
@@ -263,6 +362,10 @@ function WorkspaceApp() {
     toast("A new school workspace is ready.");
   };
   const onScans = (fresh: Result[]) => {
+    if (!allowedPage("scanner")) {
+      toast("Your account cannot save scans.");
+      return;
+    }
     const ids = new Set(fresh.map((r) => r.id)),
       students = [...(workspace.students || [])];
     fresh.forEach((r) => {
@@ -294,6 +397,10 @@ function WorkspaceApp() {
     });
   };
   const updateResult = (r: Result) => {
+    if (!allowedPage("scanner")) {
+      toast("Your account cannot correct scan results.");
+      return false;
+    }
     const known = workspace.students?.find(
       (s) => s.roll.toLowerCase() === r.roll.toLowerCase(),
     );
@@ -363,6 +470,46 @@ function WorkspaceApp() {
         )}
       </div>
     );
+  if (!workspace.exams.length)
+    return (
+      <div className="initial-loader">
+        <Logo />
+        <h1>No assigned assessments yet.</h1>
+        <p>
+          Your account can access only its assigned classes and examinations.
+          Ask an administrator to assign a class or share an assessment.
+        </p>
+        <button
+          className="button button-secondary"
+          onClick={() => void store.reload()}
+        >
+          Refresh assignments
+        </button>
+        {member?.classIds?.length ? (
+          <button
+            className="button button-primary"
+            onClick={() => setNewExam(true)}
+          >
+            Create an assigned assessment
+          </button>
+        ) : null}
+        <button
+          className="text-button"
+          onClick={() => session.logout().catch((e) => toast(e.message))}
+        >
+          Sign out
+        </button>
+        {newExam && (
+          <NewExamModal
+            onClose={() => setNewExam(false)}
+            onCreate={(e) => {
+              createExam(e);
+              setNewExam(false);
+            }}
+          />
+        )}
+      </div>
+    );
   return (
     <>
       <div className="app-shell v2-shell">
@@ -380,7 +527,7 @@ function WorkspaceApp() {
             onClick={() => navigate("overview")}
           >
             <Logo />
-            <span className="brand-edition">INTELLIGENCE</span>
+            <span className="brand-edition">ULTIMATE OMR CHECKER · AI PRO</span>
           </button>
           <div className="v2-school-switch">
             <span className="workspace-icon">
@@ -422,7 +569,7 @@ function WorkspaceApp() {
               </div>
               <nav aria-label={label}>
                 {pages
-                  .filter((p) => p.group === g)
+                  .filter((p) => p.group === g && allowedPage(p.id))
                   .map((p) => (
                     <button
                       key={p.id}
@@ -433,7 +580,7 @@ function WorkspaceApp() {
                       <p.icon size={17} strokeWidth={1.7} />
                       <span>{p.label}</span>
                       {p.id === "scanner" && (
-                        <small className="nav-new">AI</small>
+                        <small className="nav-new">CV</small>
                       )}
                       {page === p.id && <i className="nav-active-dot" />}
                     </button>
@@ -522,11 +669,13 @@ function WorkspaceApp() {
                 <span>
                   {status === "saving"
                     ? "Saving…"
-                    : status === "error" || status === "conflict"
-                      ? "Not saved"
-                      : cloud
-                        ? "Shared workspace"
-                        : "Device mode"}
+                    : status === "queued"
+                      ? "Offline queue"
+                      : status === "error" || status === "conflict"
+                        ? "Not saved"
+                        : cloud
+                          ? "Shared workspace"
+                          : "Device mode"}
                 </span>
                 <i />
               </button>
@@ -541,7 +690,8 @@ function WorkspaceApp() {
                   }}
                 >
                   <Bell size={18} />
-                  {review.length > 0 && <i />}
+                  {workspace.institutionSettings?.notifications !== false &&
+                    review.length > 0 && <i />}
                 </button>
                 {notifications && (
                   <div className="popover v2-notifications">
@@ -558,7 +708,11 @@ function WorkspaceApp() {
                     <button
                       onClick={() => {
                         setNotifications(false);
-                        if (review[0]) setStudentId(review[0].id);
+                        if (
+                          workspace.institutionSettings?.notifications === false
+                        )
+                          navigate("system");
+                        else if (review[0]) setStudentId(review[0].id);
                         else navigate("scanner");
                       }}
                     >
@@ -567,14 +721,20 @@ function WorkspaceApp() {
                       </span>
                       <span>
                         <strong>
-                          {review.length
-                            ? `${review.length} results need review`
-                            : "You’re all caught up."}
+                          {workspace.institutionSettings?.notifications ===
+                          false
+                            ? "Review notifications are paused."
+                            : review.length
+                              ? `${review.length} results need review`
+                              : "You’re all caught up."}
                         </strong>
                         <small>
-                          {review.length
-                            ? "Uncertain marks, identities, or missing pages."
-                            : "Ready for your next assessment."}
+                          {workspace.institutionSettings?.notifications ===
+                          false
+                            ? "Change your institution notification preference in Sync & system."
+                            : review.length
+                              ? "Uncertain marks, identities, or missing pages."
+                              : "Ready for your next assessment."}
                         </small>
                       </span>
                       <ArrowRight size={14} />
@@ -646,7 +806,7 @@ function WorkspaceApp() {
                         Secure school sign-in
                       </button>
                     ) : (
-                      <small>Accounts require the Node backend.</small>
+                      <small>Accounts require the FastAPI backend.</small>
                     )}
                   </div>
                 )}
@@ -654,6 +814,28 @@ function WorkspaceApp() {
             </div>
           </header>
           <main className={`main-content page-${page}`}>
+            {session.warning && (
+              <div className="v2-notice warning" role="alert">
+                {session.warning}
+              </div>
+            )}
+            {session.offline && cloud && (
+              <div className="v2-notice warning">
+                <Cloud size={18} />
+                <p>
+                  Offline / locked connection. Changes need an unlocked
+                  encrypted vault before they can be queued safely.
+                </p>
+                <button
+                  className="text-button"
+                  onClick={() =>
+                    session.reconnect().catch((e) => toast(e.message))
+                  }
+                >
+                  Verify connection
+                </button>
+              </div>
+            )}
             {(store.error || status === "conflict") && (
               <div className="v2-notice warning" role="alert">
                 <CircleAlert size={18} />
@@ -721,6 +903,15 @@ function WorkspaceApp() {
                 </div>
               }
             >
+              {!allowedPage(page) && (
+                <section className="card">
+                  <EmptyState
+                    icon={<ShieldCheck size={28} />}
+                    title="This feature is not assigned to your account."
+                    description="Your administrator controls examination, scanning, reporting and school-management permissions."
+                  />
+                </section>
+              )}
               {page === "overview" && (
                 <Dashboard
                   workspace={workspace}
@@ -736,7 +927,7 @@ function WorkspaceApp() {
                   }}
                 />
               )}
-              {page === "keys" && (
+              {page === "keys" && allowedPage("keys") && (
                 <AnswerKeys
                   workspace={workspace}
                   exam={exam}
@@ -747,7 +938,7 @@ function WorkspaceApp() {
                   toast={toast}
                 />
               )}
-              {page === "templates" && (
+              {page === "templates" && allowedPage("templates") && (
                 <Templates
                   workspace={workspace}
                   exam={exam}
@@ -756,7 +947,7 @@ function WorkspaceApp() {
                   toast={toast}
                 />
               )}
-              {page === "scanner" && (
+              {page === "scanner" && allowedPage("scanner") && (
                 <Scanner
                   key={`${schoolId}-${exam.id}`}
                   workspace={workspace}
@@ -780,9 +971,11 @@ function WorkspaceApp() {
                   onOpen={(r) => setStudentId(r.id)}
                   onUpdate={updateScoped}
                   toast={toast}
+                  reload={store.reload}
+                  saveStatus={status}
                 />
               )}
-              {page === "analytics" && (
+              {page === "analytics" && allowedPage("analytics") && (
                 <Analytics
                   workspace={workspace}
                   exam={exam}
@@ -793,7 +986,7 @@ function WorkspaceApp() {
                   toast={toast}
                 />
               )}
-              {page === "leaderboard" && (
+              {page === "leaderboard" && allowedPage("leaderboard") && (
                 <Leaderboard
                   workspace={workspace}
                   exam={exam}
@@ -802,7 +995,7 @@ function WorkspaceApp() {
                   onOpen={(r) => setStudentId(r.id)}
                 />
               )}
-              {page === "reports" && (
+              {page === "reports" && allowedPage("reports") && (
                 <Reports
                   workspace={workspace}
                   exam={exam}
@@ -821,16 +1014,50 @@ function WorkspaceApp() {
                   toast={toast}
                 />
               )}
-              {page === "backups" && (
+              {page === "backups" && allowedPage("backups") && (
                 <Backups
                   workspace={cloud ? workspace : full}
                   onRestore={(data) => setWorkspace(enrichWorkspace(data))}
                   reload={store.reload}
                   toast={toast}
+                  revision={store.revision}
                 />
               )}
-              {page === "administration" && (
+              {page === "administration" && allowedPage("administration") && (
                 <Administration workspace={workspace} toast={toast} />
+              )}
+              {page === "batches" && allowedPage("batches") && (
+                <BatchCenter
+                  workspace={workspace}
+                  exam={exam}
+                  setExamId={setExamId}
+                  revision={store.revision}
+                  reload={store.reload}
+                  saveStatus={status}
+                  toast={toast}
+                  onOpen={setStudentId}
+                />
+              )}
+              {page === "evaluation" && allowedPage("evaluation") && (
+                <EvaluationCenter
+                  workspace={workspace}
+                  exam={exam}
+                  setExamId={setExamId}
+                  onSave={updateExam}
+                  toast={toast}
+                  revision={store.revision}
+                  reload={store.reload}
+                  status={status}
+                />
+              )}
+              {page === "system" && (
+                <SystemCenter
+                  workspace={workspace}
+                  revision={store.revision}
+                  reload={store.reload}
+                  status={status}
+                  toast={toast}
+                />
               )}
             </Suspense>
             <footer className="v2-page-footer">
@@ -847,6 +1074,38 @@ function WorkspaceApp() {
           </main>
         </div>
       </div>
+      <nav className="mobile-bottom-nav" aria-label="Quick navigation">
+        {pages
+          .filter(
+            (p) =>
+              [
+                "overview",
+                "scanner",
+                "students",
+                "analytics",
+                "settings",
+              ].includes(p.id) && allowedPage(p.id),
+          )
+          .map((p) => (
+            <button
+              key={p.id}
+              className={page === p.id ? "active" : ""}
+              aria-current={page === p.id ? "page" : undefined}
+              onClick={() => navigate(p.id)}
+            >
+              <p.icon size={19} />
+              <span>
+                {p.id === "overview"
+                  ? "Home"
+                  : p.id === "scanner"
+                    ? "Scan"
+                    : p.id === "analytics"
+                      ? "Insights"
+                      : p.label}
+              </span>
+            </button>
+          ))}
+      </nav>
       <PrintReport workspace={workspace} exam={exam} results={results} />
       {student && (
         <StudentDetail
@@ -860,6 +1119,10 @@ function WorkspaceApp() {
           onClose={() => setStudentId(null)}
           onUpdate={updateResult}
           onDelete={() => {
+            if (!allowedPage("scanner")) {
+              toast("Your account cannot delete results.");
+              return;
+            }
             updateScoped({
               ...workspace,
               results: workspace.results.filter((r) => r.id !== student.id),
@@ -1012,9 +1275,9 @@ function WorkspaceApp() {
                 <h3>Keep your progress protected.</h3>
                 <p>
                   Device mode saves only to your browser. GitHub Pages cannot
-                  run accounts or a database. The included Node server provides
-                  secure accounts and shared SQLite data when separately hosted.
-                  Download regular backups and keep an off-device copy.
+                  run accounts or a database. The included FastAPI server
+                  provides secure accounts and PostgreSQL data when separately
+                  hosted. Download regular backups and keep an off-device copy.
                 </p>
               </div>
             </div>

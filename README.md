@@ -1,163 +1,92 @@
-# Markly · Assessment intelligence
+# ULTIMATE OMR CHECKER AI PRO
 
-A dark, responsive OMR workspace for registering students, designing answer sheets, evaluating exams, and understanding progress. React + TypeScript in the browser; an optional **real Node/SQLite backend** for shared data and secure administrator/teacher accounts.
+A real optical-mark examination platform: React/TypeScript client, genuine browser/server OpenCV scanning, FastAPI/Pydantic/SQLAlchemy/Alembic API, PostgreSQL production data, and an opt-in encrypted IndexedDB offline workspace.
 
-**Public device-mode app:** https://abc07552.github.io/OMR-SHEET-Check-/
+**This branch is an active implementation, not a claim of production certification.** The preserved Markly/Node service and existing data are retained. See [verification and remaining work](documentation/PROGRESS.md) for exactly what has been tested. No cloud hosting, S3 bucket, SMTP service or physical Android device has been provisioned by this repository.
 
-> **Hosting matters:** GitHub Pages serves static files. It cannot run the API, authenticate accounts, or host SQLite. The public Pages build therefore clearly identifies itself as **device mode**. The backend is included and tested, but has **not been deployed to a permanent server**. Deploy the full-stack app to enable shared school accounts. No hosting subscription, email service, or cloud backup provider is provisioned automatically.
+## Run the enterprise application
 
-## What is included
-
-- **Student register:** add, edit, delete (with linked-result confirmation), search, class filters, student progress history, CSV/XLSX imports, and a downloadable import template. Roll numbers are unique per school; leading zeroes are preserved.
-- **Multiple schools and classes:** isolated school workspaces, class creation/renaming/deletion, and sidebar school switching. A new school starts empty, not with fictional results.
-- **Assessments:** 1–500 questions; A–D or A–E; individual or pasted answer keys; positive marks, negative marking, pass thresholds; non-overlapping subject question ranges. Editing a saved key automatically recalculates existing responses. Draft keys do not contribute evaluated statistics.
-- **Layout studio:** draggable text/identity/QR/line/logo fields; local PNG/JPEG/WebP school-logo uploads embedded in templates; editable positions, sizes, type size, visibility, and content; question columns, bubble spacing/size/shape, fill threshold, questions per page, and OCR crop. PNG and **multipage A4 PDF** templates; personalised student templates.
-- **Calibration:** upload an existing upright sheet as a reference, click bubble centres/registration points, and adjust the grid and OCR region. Four-marker or paper-edge alignment. Reference images are saved with the template; they are not printed.
-- **Scanning:** real OpenCV.js perspective correction and bubble sampling; image batches; Android-friendly camera capture; live camera preview with automatic framing/capture; numeric-roll OCR using Tesseract; QR identity/page identification; PDF.js multipage/batch PDF rendering. Live captures enter the same reading pipeline automatically.
-- **Human review:** uncertain/double/faint marks, unmatched/low-confidence identities, missing pages, identity mismatches, and duplicate-page protection. Correct any response, verify identity, or explicitly accept missing pages as unanswered; scores update immediately. A rescan can replace a page without creating a second result for the same student.
-- **Analytics:** question-wise correct percentage, distractor choices, easiest/hardest questions, class comparisons, subject score/accuracy, longitudinal student results, overall/subject/class rankings, tied competition ranks, strictly-lower-score percentiles, pass/fail statistics, and distributions. Unresolved results are excluded from aggregates and rankings.
-- **Reports:** real `.xlsx` workbooks (results, questions, subject rankings, summary), formula-safe UTF-8 CSV, downloadable exam PDFs, individual multipage PDF report cards, and browser printing.
-- **Storage/recovery:** version-1 data migration; device persistence; IndexedDB recovery history; portable JSON; optional AES-256-GCM encrypted exports with PBKDF2 (310,000 iterations); manual recovery points. With a backend: SQLite persistence, optimistic concurrency, server recovery points and audit events.
-- **Accounts:** server-enforced school membership and administrator/teacher permissions, scrypt password hashes, expiring HttpOnly cookie sessions, origin/custom-header CSRF checks, login throttling, password changes, administrator-managed memberships and eligible password resets. There is **no fake browser-only “secure login.”**
-
-Fictional Greenwood Academy records are labelled as sample data. Create your own school in Settings to start with a clean register while keeping the demo available separately.
-
-## Run locally
-
-Use **Node 22.13+** (Node 24 LTS recommended) and npm. Node 22 may print an experimental warning for its built-in SQLite module.
-
-```sh
-npm ci
-# Terminal 1 — real API and persistent .data/markly.sqlite
-npm run server
-# Terminal 2 — frontend; /api is proxied to the API
-npm run dev
-```
-
-Open the Vite URL. On a new API database, create the first administrator and school. There are **no default credentials**. Passwords must be 12–128 characters. “Explore the device demo” uses a separate browser-local workspace; it does not import demo records into the shared database.
-
-`npm run dev` alone also works in device mode. OCR assets are copied from installed npm packages by `predev`/`prebuild`; the app does not depend on public OCR/CDN downloads at scan time. The larger OpenCV, OCR, PDF, and Excel engines load only when needed.
-
-## Deploy the full-stack app
-
-The simplest reliable deployment serves frontend and API **from the same HTTPS origin**, on **one Node instance with a persistent disk**. Do not use ephemeral/serverless storage for SQLite.
+Prerequisites: Node 22.13+ (Node 24 recommended), CPython 3.11, and PostgreSQL for production. The tested Python locks target CPython 3.11. Use a new database; **never point SQLAlchemy at the existing `markly.sqlite`.**
 
 ```sh
 npm ci
 npm run build
-# Set these through your hosting platform's secret/environment controls:
-# NODE_ENV=production
-# DATA_DIR=/persistent/path/markly
-# SETUP_TOKEN=<a long random server-only value>
-# PORT=<your host's port>
-npm start
+python3.11 -m venv .venv
+.venv/bin/pip install -r backend/requirements.lock
+
+# Development/local fallback creates a SEPARATE .data/enterprise.sqlite.
+# Prefer a dedicated PostgreSQL database for shared use:
+# export DATABASE_URL='postgresql+psycopg://user:password@host/database'
+.venv/bin/uvicorn backend.main:create_app --factory --host 0.0.0.0 --port 8000
 ```
 
-- Put the Node service behind your host's HTTPS reverse proxy. Production sessions use Secure cookies and will not work over plain public HTTP.
-- The Content Security Policy permits same-origin scripts plus `unsafe-eval`/WebAssembly compilation because the bundled OpenCV/Emscripten bindings require generated function constructors. It does not permit remote script hosts, and user content is never evaluated. A stricter hosting policy will require an OpenCV build compiled without dynamic execution; simply removing this allowance breaks scanning.
-- Generate the initial setup token on the server, e.g. `node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"`. **Do not paste it into issues, chat, Git, or `VITE_*` variables.** Enter it privately in the first-administrator screen. Remove/rotate it after setup; setup is permanently disabled once the first account exists.
-- Mount/persist **all of `DATA_DIR`**: the SQLite database, WAL files, and backup directory. The server binds to `0.0.0.0`; health is `GET /api/health`.
-- Use a single app instance for this SQLite design. Horizontal/multi-region deployments require a different shared-database architecture.
-- Use your host's encrypted disk and an **off-server backup** policy. Built-in server recovery files are on the same disk, not geographically separate cloud backups.
-- A host-provided `PORT`, `DATA_DIR`, and HTTPS proxy are sufficient. The `.env.example` describes the optional configuration.
+Open port 8000. FastAPI serves the built React application and `/api` on the same origin. First-run setup creates your own administrator; there are no default credentials. `/api/docs` describes the API. A separate device demo is explicitly labeled and is not authenticated school data.
 
-### Docker
+For frontend hot reload, keep FastAPI running and, in another terminal:
 
 ```sh
-docker build -t markly .
-# Supply SETUP_TOKEN through your secret manager or an untracked environment file.
-# Run behind an HTTPS reverse proxy; mount a durable volume at /app/data.
-docker run --env-file .env.production -p 3001:3001 -v markly-data:/app/data markly
+VITE_API_PROXY=http://127.0.0.1:8000 npm run dev -- --port 5173
 ```
 
-The runtime runs as an unprivileged user and installs production dependencies only. The Dockerfile is supplied; running a Docker deployment is the operator's responsibility.
+Open port 5173, not a browser-side localhost API URL. Vite proxies relative `/api` requests. The service worker is generated for production builds, not the hot-reload server.
 
-### Separate API / GitHub Pages frontend (optional)
+Production requires `APP_ENV=production`, a PostgreSQL `DATABASE_URL`, a stable Fernet `BACKUP_KEY`, an HTTPS `PUBLIC_APP_URL`, and a first-run `SETUP_TOKEN`. Terminate HTTPS at a trusted reverse proxy, persist the data volume, restrict network access and configure backups. See [architecture](documentation/ARCHITECTURE.md) and [migration](documentation/MIGRATION.md). The existing Dockerfile currently targets the preserved Node service; an enterprise container deployment is still being finalized.
 
-At frontend build time, set `VITE_API_BASE=https://your-real-api-host/api`. On the API, set `PUBLIC_WEB_ORIGIN` to the **exact frontend origin** (for this Pages site: `https://abc07552.github.io`, without the repository path). Use HTTPS at both ends. The API never accepts wildcard credentialed CORS. Cross-site cookie restrictions vary by browser; same-origin hosting is strongly preferred.
+## Working capabilities
 
-Changing `VITE_API_BASE` requires a new frontend build. Merely pushing server source to GitHub Pages does **not** deploy the server.
+- Navy/electric-blue responsive interface, light/dark/system themes, role-aware navigation, command search, filters and real-record dashboard metrics.
+- Super-administrator institutions; administrator account management; assigned-class and feature-restricted teachers; private, explicitly published student results/progress/report cards.
+- Camera/gallery/drop/multi-image/PDF scanning; browser OpenCV.js or native Python OpenCV; calibrated templates, perspective/orientation handling, QR/barcode and numeric roll OCR. Detection never uses the answer key to infer marks.
+- Up to **500 questions**, **2–5 options including A–E**, multipage layouts, draggable fields, logos, geometry calibration, PDF/print templates and retained template versions.
+- Durable server scan jobs with categorized failures/retry, explicit identity matching, revision-checked page application and operation receipts. Original pixels are retained encrypted; evidence includes measured coordinates, per-answer status/confidence and manual-verification history.
+- Student CRUD and column-mapped CSV/XLSX imports: inspection → validation/duplicate preview → invalid-row report → explicit confirmation → transactional import. No automatic import just from uploading a file.
+- Decimal-based scoring, alternate/multiple-answer sets, negative/partial/blank policies, versioned keys, authorized re-evaluation and historical evaluations. Unverified uncertain marks, flagged identities and missing pages do not silently become final results.
+- Actual-record question/option/subject analytics, competition ranks and percentiles; real PDF, XLSX and CSV downloads. Formula-like spreadsheet text is escaped.
+- Optional encrypted staff/student offline vaults with separate passphrases, 24-hour authorization, account/scope isolation, retained originals and conflict-aware synchronization. A stale revision blocks, preserves unsent data and requires explicit reconciliation; it never silently overwrites a newer server version.
+- Validated institution defaults/contact/logo, service health, audit and sync journals, encrypted recovery points, local/S3-compatible object storage and SMTP recovery configuration.
 
-## Roles and recovery
+Some API capabilities have stronger automated coverage than their browser workflows. Read the ledger rather than treating this list as verification of every device, photo or deployment.
 
-| Operation                                                             | Teacher | School administrator |
-| --------------------------------------------------------------------- | ------: | -------------------: |
-| Student/class CRUD, keys/layouts, scans, corrections                  |     Yes |                  Yes |
-| Analytics, reports, downloadable exports                              |     Yes |                  Yes |
-| Rename institution, manage memberships, create another school         |      No |                  Yes |
-| Import/replace a shared workspace; list/create/restore server backups |      No |                  Yes |
-| Change own password                                                   |     Yes |                  Yes |
+## Scanning and privacy notes
 
-Teachers can export personal/student data as part of their reporting role; only give accounts to trusted staff. Server backup restore requires the current administrator password. A school cannot lose its last administrator. Removing membership revokes access immediately.
+Use a known/calibrated template, print at 100% scale, retain all registration corners and verify a sample before a large run. OCR and identity matches need human checking. Poor lighting, erasures, overlapping marks, unknown layouts and physical camera behavior cannot be guaranteed by synthetic-image tests. Native Tesseract OCR additionally needs the `tesseract` executable; browser English OCR assets are self-hosted during the build.
 
-New-account passwords must be shared securely; **no invitation/reset email is sent**. Existing-account membership does not change that account's password. Administrators can reset a non-owner account belonging exclusively to their school after confirming their own password. Multi-school accounts and the initial owner use their own password-change flow, or server-owner recovery:
+Authenticated APIs and original images use `no-store`; the PWA precaches only application code, fonts and local OCR assets, including the PDF worker. Private data is not put in the service-worker HTTP cache. Offline access is opt-in: PBKDF2/AES-GCM encrypted IndexedDB, keys in memory, separate passphrase, bounded lifetime and storage. After sign-out private views lock; an offline sign-out defers server-cookie revocation until reconnection. Device demo data is separate and unencrypted.
 
-```sh
-# In an interactive terminal on the trusted server, with the correct DATA_DIR:
-npm run admin:reset
-```
-
-The recovery command prompts for email and a hidden, confirmed new password and revokes all sessions. It is a local operator tool, not an unauthenticated HTTP reset endpoint.
-
-## Safe scanning workflow
-
-1. Register the students and their **unique** roll numbers. Create and complete an answer key.
-2. Open Layout studio. Save a standard layout, or upload a reference and calibrate it. Keep the fields/grid inside the printable area. Different layouts require their own calibration; arbitrary third-party sheets are **not** guessed automatically.
-3. Download the PDF template, optionally for a selected student. A 500-question standard template has five pages. Print on A4 at **100% scale**, without cropping or “fit to page.” QR fields identify assessment, page, and optional roll.
-4. Photograph upright in even lighting, retaining the whole sheet and all four registration squares. Paper-edge mode needs a contrasting background. Do not rotate pages sideways/upside down. Check a known sample before a large batch.
-5. Upload images/PDFs, capture an Android photo, or use live camera. The browser needs camera permission and HTTPS (localhost is allowed by browsers). An embedded preview may require opening the app in its own tab and allowing camera access.
-6. For legacy PDFs without a Markly QR, pages are initially assigned in sequential exam-page order. **Verify page numbers** and enter/match a roll number (or use calibrated numeric OCR) on every page. Reordering/omitting pages must be corrected manually. QR-identified pages can be merged out of order.
-7. Review uncertain marks, unmatched identities, and missing pages. OCR supports **numeric, clearly written/printed roll numbers**, not unrestricted handwriting/name recognition. QR identity also supports non-numeric rolls. Never treat OCR as authoritative without verification.
-8. Correct responses and export the reports you need. Download a backup before destructive changes.
-
-**Limits:** 50 MB per uploaded file; up to 200 rendered pages per batch; up to 100 questions per printed page and 500 per exam. The backend limits a school workspace request to 15 MB, with schema caps of 20,000 students, 1,000 exams and 50,000 results (the byte limit may be reached first). Large PDF/image batches consume browser memory; use smaller batches on mobile. No image-recognition system can guarantee correct results for every photograph.
-
-Only answers and identity/result metadata are saved by scanning; temporary scan thumbnails are discarded on navigation. Uploaded **calibration reference images** are intentionally saved in the layout and thus appear in backups. Do not use references containing unnecessary personal information.
-
-## Data, backups, and concurrency
-
-- Existing `markly-workspace-v1` data migrates without dropping exam/result history; a roster is derived once. Migration does not silently send local data to the server.
-- Device state uses browser localStorage; recovery points use IndexedDB. Different browsers, origins, and devices have different data. Clearing browser storage removes both. Private mode/quota failures are surfaced with an export action.
-- Device automatic recovery runs on workspace changes at most once per five minutes, retaining 10 automatic points. Manual points remain until deleted.
-- Server automatic points are made before the first write in each 15-minute window, plus a daily check while the process runs. The latest **14 automatic points** are retained (not “14 days”); manual points are retained. Restores preserve a pre-restore point. These are recovery files on the same server, not offsite disaster recovery.
-- AES-GCM encrypted exports require the original passphrase; there is no recovery for a lost passphrase. Unencrypted backups contain personal data. Downloaded workspace files do not contain account password hashes, sessions, or permissions.
-- The SQLite database contains account hashes and memberships; protect/backup the entire server volume separately. Use a consistent SQLite backup or stop the service before copying the database/WAL files.
-- Conflicting shared edits do not silently overwrite another teacher's work. The app blocks autosave, offers an unsaved-data download, and asks you to reload the server version. Download first; this is optimistic concurrency, not real-time collaborative merging. Refresh/reopen to see another teacher's saved changes.
+A lost offline passphrase cannot be recovered. Server-side encrypted originals/recovery points require the original `BACKUP_KEY`. Application recovery points are not complete disaster-recovery backups: preserve the PostgreSQL database, object storage and encryption key separately, with off-site retention and restore drills.
 
 ## Verify
 
 ```sh
-npm run test:all    # 58 browser-logic/OMR/backup tests + 30 API/security/persistence tests
-npm run build      # strict TypeScript + production bundle
-npm audit --omit=dev
+npm run test:all                     # frontend/unit + preserved Node regression tests
+npm run build                       # strict TypeScript, Vite, PWA generation
+.venv/bin/pip install -r backend/requirements-dev.lock
+.venv/bin/ruff check backend
+.venv/bin/ruff format --check backend
+.venv/bin/pytest -q backend/tests    # SQLite + genuine OpenCV tests
+
+# Also run the database-parametrized API suite on a dedicated QA PostgreSQL DB:
+OMR_TEST_POSTGRES_URL='postgresql://user:password@host/qa_db' .venv/bin/pytest -q backend/tests
+npm audit
+.venv/bin/pip check
 ```
 
-Browser QA additionally exercised real OpenCV A–E reads, five-page/500-question PDF merging, the local OCR worker, genuine four-sheet XLSX files, individual PDF cards, encrypted UI restore, full-stack teacher/admin workflows, and **99 page/viewport combinations** (360–1440 px) without horizontal document overflow. A physical Android camera/lighting test is still recommended; browser permission/framing behaviour varies by device. Automated test results are not a promise that all possible photos/layouts are supported.
+The PostgreSQL test user must be allowed to create/drop isolated schemas in the QA database. Do not use production credentials or a database that may be reset by other tooling. Current executed results are in [PROGRESS.md](documentation/PROGRESS.md); dependency checks are snapshots, not security certification.
 
-Production dependency audit is clean at the last verification. There is an **unpatched upstream development-tool advisory** in the Vite/Vitest `picomatch` chain ([GHSA-fc5q-39xc-vjpf](https://github.com/advisories/GHSA-fc5q-39xc-vjpf)); the full audit currently reports five high-severity entries for that chain. No patched picomatch release is published in the registry used here. Build/test globs are repository-controlled, and the Node production API does not load this development chain. Do not expose the Vite dev server as a public production service or feed it untrusted glob configuration. Upgrade when a verified patch is available; do not use `npm audit fix --force` to blindly downgrade tooling. ExcelJS's vulnerable legacy UUID dependency is overridden to the tested patched v11 API.
+## Preserve existing installations
 
-## Update the existing GitHub Pages site
+The verified Node baseline is commit `8b5360f`; the enterprise API checkpoint is `eea3ae5`. `server/` remains runnable with `npm run server`, and the old SQLite file is never an enterprise destination. Read [MIGRATION.md](documentation/MIGRATION.md) before cutover; migration opens the source read-only, retains a consistent private copy, requires an empty destination and does not migrate sessions. Legacy teachers require explicit class assignments.
 
-Pages currently publishes the **`arena/ae8cdeb1-omr-sheet-check` branch, `/docs` directory**. Keep that source setting.
+[Archived Node documentation](documentation/NODE_BASELINE.md) records the old workflow. GitHub Pages can serve the static client/device demo, **not FastAPI or PostgreSQL**. The tracked `docs/` site is a separately built publication and is not automatically updated by `npm run build` or by opening a pull request.
 
-```sh
-npm ci
-npm run build:pages
-# Review and commit source + the regenerated docs/ directory on the current branch.
-# Push that same branch; GitHub Pages publishes the checked-in /docs output.
-```
+## Source map
 
-`docs/` is intentionally tracked; `.nojekyll` is included. The build uses `/OMR-SHEET-Check-/` asset paths. `public/vendor/` is generated/ignored; `build:pages` copies its required OCR assets into the published build. Do not publish `.data/`, `.env`, account databases, or backup files.
+- `src/session.tsx`, `src/offline.ts`: authentication, encrypted offline authorization, stable operation queues and revision conflicts.
+- `src/Scanner.tsx`, `src/scanEngine.ts`, `src/omr.ts`, `src/geometry.ts`: real browser scans, camera/PDF input and printable geometry.
+- `src/BatchCenter.tsx`, `src/ScanEvidence.tsx`, `src/Students.tsx`: native job application, originals/overlays and atomic human corrections.
+- `src/StudentImport.tsx`, `src/StudentPortal.tsx`, `src/EvaluationCenter.tsx`, `src/SystemCenter.tsx`: imports, private results, scoring policy and operations.
+- `backend/`: relational API, schemas/migrations, authorization, deterministic scoring, genuine native OMR, encrypted storage and reports.
+- `backend/tests/`, `src/*.test.*`, `server/*.test.mjs`: automated regression suites.
+- `documentation/`: architecture, migration, verification and deployment notes; [THIRD_PARTY.md](THIRD_PARTY.md): component/license information.
 
-The live Pages site's browser data remains local to that site's origin. Export/restore JSON to transfer from a preview or another device.
-
-## Implementation map
-
-- `src/data.ts`, `src/layout.ts`: migration, validation, grading, analytics, ranking, and editable geometry.
-- `src/omr.ts`, `src/scanEngine.ts`, `src/Scanner.tsx`: printable sheets/PDFs, perspective alignment, bubble reading, local OCR, PDF batches, and camera flow.
-- `src/session.tsx`, `server/`: authentication, membership enforcement, SQLite, revisioned saves, backups and audit.
-- `src/Roster.tsx`, `src/Templates.tsx`, `src/Leaderboard.tsx`: student CRUD/history, visual calibration, subject/overall rankings.
-- `src/storage.ts`, `src/documents.ts`: encrypted portable backups, IndexedDB, real Excel/PDF generation.
-- `scripts/prepare-assets.mjs`: self-hosted OCR assets. `public/fonts/`: Noto Sans and its OFL license for PDF text.
-
-See [THIRD_PARTY.md](THIRD_PARTY.md) for major third-party components. Student information should be processed and shared in accordance with your institution's consent, retention and access policies.
+Protect student information according to your institution's consent, retention and access policies.

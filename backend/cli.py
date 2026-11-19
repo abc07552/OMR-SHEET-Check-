@@ -23,6 +23,13 @@ def migrate_node(source: Path, settings: Settings):
     source = source.resolve()
     if not source.is_file():
         raise ValueError("The source Node SQLite database does not exist. Nothing was created or changed.")
+    if (
+        settings.database_url.startswith("sqlite:///")
+        and Path(settings.database_url.removeprefix("sqlite:///")).resolve() == source
+    ):
+        raise ValueError(
+            "Source and enterprise destination must be different databases. The source was not opened for writing."
+        )
     engine = engine_for(settings)
     migrate(engine)
     with sessions_for(engine)() as db:

@@ -1,10 +1,23 @@
 import cvURL from "@techstark/opencv-js/dist/opencv.js?url";
 import jsQR from "jsqr";
-import type { Exam, Option } from "./data";
+import type { AnswerDetection, Exam, Option } from "./data";
 import { getOptions } from "./data";
 import { getLayout, pageCount, sheetSignature, WIDTH, HEIGHT } from "./layout";
 import type { Point } from "./layout";
-import { analyzeAlignedImageData, analyzeImageData, MARKERS } from "./omr";
+import {
+  analyzeAlignedImageData,
+  analyzeImageEvidence,
+  MARKERS,
+  questionPosition,
+} from "./omr";
+import {
+  identity3,
+  inverse3,
+  multiply3,
+  project3,
+  rotation3,
+} from "./geometry";
+import type { Matrix3 } from "./geometry";
 
 type CV = any;
 let cvReady: Promise<{ cv: CV }> | undefined;
@@ -203,13 +216,21 @@ function pageQuad(cv: CV, src: CV): Point[] {
     hierarchy.delete();
   }
 }
-function align(cv: CV, canvas: HTMLCanvasElement, exam: Exam) {
+function alignOne(cv: CV, canvas: HTMLCanvasElement, exam: Exam) {
   const src = cv.imread(canvas),
     dest = new cv.Mat(),
     layout = getLayout(exam);
   let source: Point[];
   try {
-    const reference = exam.layout?.anchors || MARKERS;
+    const reference =
+      layout.anchorMode === "page"
+        ? [
+            { x: 0, y: 0 },
+            { x: WIDTH - 1, y: 0 },
+            { x: WIDTH - 1, y: HEIGHT - 1 },
+            { x: 0, y: HEIGHT - 1 },
+          ]
+        : exam.layout?.anchors || MARKERS;
     source =
       layout.anchorMode === "page"
         ? pageQuad(cv, src)
@@ -247,7 +268,11 @@ function align(cv: CV, canvas: HTMLCanvasElement, exam: Exam) {
       output.width = WIDTH;
       output.height = HEIGHT;
       cv.imshow(output, dest);
-      return output;
+      const values = Array.from(matrix.data64F as Float64Array);
+      return {
+        canvas: output,
+        matrix: [values.slice(0, 3), values.slice(3, 6), values.slice(6, 9)],
+      };
     } finally {
       matrix.delete();
     }
@@ -255,6 +280,123 @@ function align(cv: CV, canvas: HTMLCanvasElement, exam: Exam) {
     src.delete();
     dest.delete();
   }
+}
+function registrationQuality(canvas: HTMLCanvasElement, exam: Exam) {
+  const data = canvas
+    .getContext("2d", { willReadFrequently: true })!
+    .getImageData(0, 0, WIDTH, HEIGHT);
+  const values: number[] = [];
+  for (
+    let q = 0;
+    q < Math.min(24, exam.questions, getLayout(exam).questionsPerPage);
+    q++
+  ) {
+    const p = questionPosition(q, exam);
+    for (const x of p.xs) {
+      let ring = 0,
+        outside = 0,
+        nr = 0,
+        no = 0;
+      const r = Math.ceil(p.radius + 4);
+      for (let y = -r; y <= r; y += 2)
+        for (let dx = -r; dx <= r; dx += 2) {
+          const distance = Math.hypot(dx, y),
+            px = Math.round(x + dx),
+            py = Math.round(p.y + y);
+          if (px < 0 || py < 0 || px >= WIDTH || py >= HEIGHT) continue;
+          const i = (py * WIDTH + px) * 4,
+            brightness =
+              (data.data[i] + data.data[i + 1] + data.data[i + 2]) / 3;
+          if (Math.abs(distance - p.radius) < 2) {
+            ring += brightness;
+            nr++;
+          } else if (distance > p.radius + 2 && distance <= p.radius + 4) {
+            outside += brightness;
+            no++;
+          }
+        }
+      if (nr && no) values.push(outside / no - ring / nr);
+    }
+  }
+  values.sort((a, b) => b - a);
+  const top = values.slice(0, 8);
+  let score = top.length ? top.reduce((a, b) => a + b, 0) / top.length : 0;
+  // QR placement disambiguates symmetric 180-degree registration without reading the key.
+  const qr = jsQR(data.data, WIDTH, HEIGHT, {
+    inversionAttempts: "dontInvert",
+  });
+  if (qr) {
+    try {
+      const meta = JSON.parse(qr.data);
+      if (meta.m === 2) {
+        const f = getLayout(exam).fields.find(
+            (v) => v.visible && v.type === "qr",
+          ),
+          expected = f
+            ? { x: f.x + f.width / 2, y: f.y + f.height / 2 }
+            : { x: 1100, y: 262 };
+        const center = {
+          x:
+            (qr.location.topLeftCorner.x + qr.location.bottomRightCorner.x) / 2,
+          y:
+            (qr.location.topLeftCorner.y + qr.location.bottomRightCorner.y) / 2,
+        };
+        score +=
+          180 *
+          Math.max(
+            0,
+            1 - Math.hypot(center.x - expected.x, center.y - expected.y) / 450,
+          );
+      }
+    } catch {
+      /* Arbitrary barcodes do not provide a Markly orientation hint. */
+    }
+  }
+  return score;
+}
+function align(cv: CV, canvas: HTMLCanvasElement, exam: Exam) {
+  const candidates =
+    canvas.width / canvas.height > 1.2
+      ? [1, 3]
+      : canvas.width / canvas.height < 0.82
+        ? [0, 2]
+        : [0, 1, 2, 3];
+  let best:
+    { canvas: HTMLCanvasElement; matrix: Matrix3; quality: number } | undefined;
+  let failure: unknown;
+  for (const k of candidates) {
+    const rotated = document.createElement("canvas");
+    rotated.width = k % 2 ? canvas.height : canvas.width;
+    rotated.height = k % 2 ? canvas.width : canvas.height;
+    const ctx = rotated.getContext("2d")!;
+    ctx.translate(rotated.width / 2, rotated.height / 2);
+    ctx.rotate((-k * Math.PI) / 2);
+    ctx.drawImage(canvas, -canvas.width / 2, -canvas.height / 2);
+    try {
+      const registered = alignOne(cv, rotated, exam),
+        quality = registrationQuality(registered.canvas, exam);
+      const matrix = multiply3(
+        registered.matrix,
+        rotation3(k, canvas.width + 1, canvas.height + 1),
+      );
+      if (!best || quality > best.quality) {
+        if (best) best.canvas.width = 0;
+        best = { canvas: registered.canvas, matrix, quality };
+      } else registered.canvas.width = 0;
+    } catch (e) {
+      failure = e;
+    }
+    rotated.width = 0;
+  }
+  if (!best)
+    throw failure || new Error("No reliable sheet registration was found.");
+  if (best.quality < 9) {
+    best.canvas.width = 0;
+    throw new Error(
+      "The printed bubble grid does not match this template, or the image is too blurred. Retake the image or calibrate its layout.",
+    );
+  }
+  return best;
 }
 let ocrWorker: Promise<import("tesseract.js").Worker> | undefined;
 export async function readRollNumber(
@@ -324,9 +466,17 @@ export interface ScannedPage {
   roll: string;
   rollConfidence: number;
   confidence: number;
-  engine: "opencv" | "canvas";
+  engine: "opencv" | "canvas" | "opencv-python";
   preview: string;
   qrMatched: boolean;
+  answerMeta?: AnswerDetection[];
+  detectedOptions?: Option[][];
+  objectId?: string;
+  questionSet?: string;
+  sourceToAligned?: Matrix3;
+  sourceWidth?: number;
+  sourceHeight?: number;
+  warnings?: string[];
 }
 export async function scanPageFile(
   file: File,
@@ -348,6 +498,8 @@ export async function scanPageFile(
       "This file is not a readable image. Use PNG, JPEG or WebP.",
     );
   }
+  const sourceWidth = bitmap.width,
+    sourceHeight = bitmap.height;
   const canvas = document.createElement("canvas"),
     scale = Math.min(1, 2200 / Math.max(bitmap.width, bitmap.height));
   canvas.width = Math.round(bitmap.width * scale);
@@ -357,12 +509,19 @@ export async function scanPageFile(
   context.fillRect(0, 0, canvas.width, canvas.height);
   context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
   bitmap.close();
+  let sourceToAligned = identity3();
   let aligned = canvas,
     engine: "opencv" | "canvas" = settings.engine || "opencv";
   if (engine === "opencv") {
     settings.onStage?.("Aligning sheet with OpenCV…");
     const { cv } = await loadOpenCV();
-    aligned = align(cv, canvas, exam);
+    const registered = align(cv, canvas, exam);
+    aligned = registered.canvas;
+    sourceToAligned = multiply3(registered.matrix, [
+      [scale, 0, 0],
+      [0, scale, 0],
+      [0, 0, 1],
+    ]);
   } else if (exam.layout?.anchorMode === "page")
     throw new Error("Paper-edge calibration requires the OpenCV engine.");
   const ctx = aligned.getContext("2d", { willReadFrequently: true })!,
@@ -370,7 +529,8 @@ export async function scanPageFile(
   let pageIndex = settings.pageIndex || 0,
     roll = "",
     rollConfidence = 0,
-    qrMatched = false;
+    qrMatched = false,
+    questionSet = "A";
   // Decode the whole aligned page: supports moved QR fields and calibrated templates.
   const qr = jsQR(image.data, image.width, image.height, {
     inversionAttempts: "dontInvert",
@@ -402,6 +562,7 @@ export async function scanPageFile(
           throw new Error("Invalid page number in the sheet identifier.");
         pageIndex = meta.p;
         roll = typeof meta.r === "string" ? meta.r : "";
+        questionSet = typeof meta.s === "string" ? meta.s : "A";
         rollConfidence = roll ? 100 : 0;
         qrMatched = true;
       }
@@ -418,10 +579,12 @@ export async function scanPageFile(
     answers: (Option | null)[];
     flagged: number[];
     confidence?: number;
+    answerMeta?: AnswerDetection[];
+    detectedOptions?: Option[][];
   };
   if (engine === "opencv")
     result = analyzeAlignedImageData(image, exam, pageIndex);
-  else result = analyzeImageData(image, exam, pageIndex);
+  else result = analyzeImageEvidence(image, exam, pageIndex);
   if (settings.ocr && !roll) {
     try {
       const found = await readRollNumber(aligned, exam, settings.onStage);
@@ -432,6 +595,16 @@ export async function scanPageFile(
         `OCR unavailable: ${e instanceof Error ? e.message : "enter roll manually"}`,
       );
     }
+  }
+  if (engine === "opencv" && result.answerMeta) {
+    const inverse = inverse3(sourceToAligned);
+    result.answerMeta = result.answerMeta.map((m) => ({
+      ...m,
+      coordinates: m.coordinates.map((p) => ({
+        ...p,
+        ...project3(inverse, p.alignedX!, p.alignedY!),
+      })),
+    }));
   }
   const thumb = document.createElement("canvas");
   thumb.width = 350;
@@ -446,6 +619,10 @@ export async function scanPageFile(
     engine,
     preview: thumb.toDataURL("image/jpeg", 0.6),
     qrMatched,
+    questionSet,
+    sourceToAligned,
+    sourceWidth,
+    sourceHeight,
   };
 }
 export async function* pdfImages(

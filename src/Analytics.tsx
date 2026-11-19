@@ -22,13 +22,7 @@ import {
   Users,
 } from "lucide-react";
 import type { Exam, Result, Workspace } from "./data";
-import {
-  downloadFile,
-  getStats,
-  questionStats,
-  getOptions,
-  subjectStats,
-} from "./data";
+import { downloadFile, getStats, questionStats, subjectStats } from "./data";
 import { EmptyState, PageHeading, Select } from "./components";
 import { ExamBar } from "./Overview";
 interface Props {
@@ -40,23 +34,7 @@ interface Props {
   setQuestion: (q: number) => void;
   toast: (text: string) => void;
 }
-export function questionCSV(results: Result[], exam: Exam) {
-  const stats = questionStats(results, exam);
-  return [
-    `Question,Correct answer,Correct responses,Total evaluated,Accuracy (%),${getOptions(exam).join(",")},Unanswered`,
-    ...stats.map((q) =>
-      [
-        q.number,
-        q.answer || "",
-        q.correct,
-        q.total,
-        q.percentage.toFixed(1),
-        ...q.counts.map((c) => c.count),
-        q.blank,
-      ].join(","),
-    ),
-  ].join("\r\n");
-}
+import { questionCSV } from "./reportData";
 export default function Analytics({
   workspace,
   exam,
