@@ -22,6 +22,9 @@
   },
   "dependencies": {
     "@fontsource-variable/dm-sans": "^5.2.6",
+    "@hookform/resolvers": "7.0.7",
+    "@tailwindcss/vite": "4.3.5",
+    "@tanstack/react-query": "5.108.0",
     "@techstark/opencv-js": "^4.12.0-release.1",
     "@tesseract.js-data/eng": "^1.0.0",
     "exceljs": "^4.4.0",
@@ -35,11 +38,15 @@
     "qrcode": "^1.5.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "react-hook-form": "7.92.0",
+    "react-router-dom": "7.18.6",
     "recharts": "^2.15.1",
+    "tailwindcss": "4.3.5",
     "tesseract.js": "^7.0.0",
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@playwright/test": "1.65.1",
     "@types/node": "^22.10.5",
     "@types/qrcode": "^1.5.6",
     "@types/react": "^19.0.3",
@@ -49,6 +56,7 @@
     "supertest": "^7.3.2",
     "typescript": "~5.7.2",
     "vite": "^6.0.5",
+    "vite-plugin-pwa": "2.0.0",
     "vitest": "^5.1.0"
   },
   "engines": {
@@ -57,6 +65,9 @@
   "overrides": {
     "exceljs": {
       "uuid": "^11.1.1"
+    },
+    "workbox-build": {
+      "glob": "14.0.6"
     }
   }
 }
