@@ -4,12 +4,8 @@ import type { AnswerDetection, Exam, Option } from "./data";
 import { getOptions } from "./data";
 import { getLayout, pageCount, sheetSignature, WIDTH, HEIGHT } from "./layout";
 import type { Point } from "./layout";
-import {
-  analyzeAlignedImageData,
-  analyzeImageEvidence,
-  MARKERS,
-  questionPosition,
-} from "./omr";
+import { outlineReadability } from "./omrQuality";
+import { analyzeAlignedImageData, analyzeImageEvidence, MARKERS } from "./omr";
 import {
   identity3,
   inverse3,
@@ -80,7 +76,15 @@ function cvMarkers(cv: CV, src: CV, reference: Point[]): Point[] {
     hierarchy = new cv.Mat();
   try {
     cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
-    cv.threshold(gray, binary, 90, 255, cv.THRESH_BINARY_INV);
+    cv.adaptiveThreshold(
+      gray,
+      binary,
+      255,
+      cv.ADAPTIVE_THRESH_GAUSSIAN_C,
+      cv.THRESH_BINARY_INV,
+      61,
+      12,
+    );
     cv.findContours(
       binary,
       contours,
@@ -285,42 +289,8 @@ function registrationQuality(canvas: HTMLCanvasElement, exam: Exam) {
   const data = canvas
     .getContext("2d", { willReadFrequently: true })!
     .getImageData(0, 0, WIDTH, HEIGHT);
-  const values: number[] = [];
-  for (
-    let q = 0;
-    q < Math.min(24, exam.questions, getLayout(exam).questionsPerPage);
-    q++
-  ) {
-    const p = questionPosition(q, exam);
-    for (const x of p.xs) {
-      let ring = 0,
-        outside = 0,
-        nr = 0,
-        no = 0;
-      const r = Math.ceil(p.radius + 4);
-      for (let y = -r; y <= r; y += 2)
-        for (let dx = -r; dx <= r; dx += 2) {
-          const distance = Math.hypot(dx, y),
-            px = Math.round(x + dx),
-            py = Math.round(p.y + y);
-          if (px < 0 || py < 0 || px >= WIDTH || py >= HEIGHT) continue;
-          const i = (py * WIDTH + px) * 4,
-            brightness =
-              (data.data[i] + data.data[i + 1] + data.data[i + 2]) / 3;
-          if (Math.abs(distance - p.radius) < 2) {
-            ring += brightness;
-            nr++;
-          } else if (distance > p.radius + 2 && distance <= p.radius + 4) {
-            outside += brightness;
-            no++;
-          }
-        }
-      if (nr && no) values.push(outside / no - ring / nr);
-    }
-  }
-  values.sort((a, b) => b - a);
-  const top = values.slice(0, 8);
-  let score = top.length ? top.reduce((a, b) => a + b, 0) / top.length : 0;
+  const readability = outlineReadability(data, exam);
+  let score = readability;
   // QR placement disambiguates symmetric 180-degree registration without reading the key.
   const qr = jsQR(data.data, WIDTH, HEIGHT, {
     inversionAttempts: "dontInvert",
@@ -352,7 +322,7 @@ function registrationQuality(canvas: HTMLCanvasElement, exam: Exam) {
       /* Arbitrary barcodes do not provide a Markly orientation hint. */
     }
   }
-  return score;
+  return { score, readability };
 }
 function align(cv: CV, canvas: HTMLCanvasElement, exam: Exam) {
   const candidates =
@@ -362,7 +332,13 @@ function align(cv: CV, canvas: HTMLCanvasElement, exam: Exam) {
         ? [0, 2]
         : [0, 1, 2, 3];
   let best:
-    { canvas: HTMLCanvasElement; matrix: Matrix3; quality: number } | undefined;
+    | {
+        canvas: HTMLCanvasElement;
+        matrix: Matrix3;
+        quality: number;
+        readability: number;
+      }
+    | undefined;
   let failure: unknown;
   for (const k of candidates) {
     const rotated = document.createElement("canvas");
@@ -379,9 +355,14 @@ function align(cv: CV, canvas: HTMLCanvasElement, exam: Exam) {
         registered.matrix,
         rotation3(k, canvas.width + 1, canvas.height + 1),
       );
-      if (!best || quality > best.quality) {
+      if (!best || quality.score > best.quality) {
         if (best) best.canvas.width = 0;
-        best = { canvas: registered.canvas, matrix, quality };
+        best = {
+          canvas: registered.canvas,
+          matrix,
+          quality: quality.score,
+          readability: quality.readability,
+        };
       } else registered.canvas.width = 0;
     } catch (e) {
       failure = e;
@@ -390,7 +371,8 @@ function align(cv: CV, canvas: HTMLCanvasElement, exam: Exam) {
   }
   if (!best)
     throw failure || new Error("No reliable sheet registration was found.");
-  if (best.quality < 9) {
+  // A sharp QR can guide orientation, but cannot rescue an unreadable bubble grid.
+  if (best.readability < 9) {
     best.canvas.width = 0;
     throw new Error(
       "The printed bubble grid does not match this template, or the image is too blurred. Retake the image or calibrate its layout.",

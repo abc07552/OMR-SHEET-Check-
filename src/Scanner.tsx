@@ -745,9 +745,11 @@ export default function Scanner({
             <ShieldCheck size={22} />
             <h3>Private by design.</h3>
             <p>
-              OpenCV, PDF rendering, and OCR run in your browser. Sheet images
-              are not sent to the server or saved with results. Only responses
-              and verified student details are retained.
+              {session.phase === "authenticated"
+                ? session.backend === "fastapi"
+                  ? "OpenCV.js reads in your browser. Original sheets are encrypted and retained on your school’s server for authorized review, or in an opt-in encrypted vault while offline. Choosing native OpenCV sends the image to your server for processing."
+                  : "Browser detection runs on this device. The preserved Node service saves responses, but does not archive original sheets. Use FastAPI for encrypted evidence retention."
+                : "Device-demo detection and originals stay in this browser. Demo records are not an authenticated school account or an encrypted offline vault; avoid private student data here."}
             </p>
           </div>
         </aside>

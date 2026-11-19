@@ -6,7 +6,7 @@ The default `Dockerfile` now builds the React application and a non-root CPython
 
 ## Supported configuration
 
-- Node 24 builds the client; Python 3.11 uses `backend/requirements.lock` at runtime. Node/npm development dependencies are not installed into the Python runtime.
+- Node 24 builds the client; Python 3.11 uses `backend/requirements.lock` at runtime with `--require-hashes --only-binary=:all:`. Both runtime and development closures include pinned versions and published non-yanked PyPI SHA-256 artifact hashes. The locks were installed in a clean Linux x86-64 CPython 3.11 environment; validate a different platform's installation separately. Node/npm development dependencies and development-only Bandit are not installed into the Python runtime.
 - PostgreSQL is mandatory when `APP_ENV=production`. SQLite is for separate local databases/tests only.
 - Build-time assets are self-hosted: OpenCV.js, English browser OCR, PDF worker and fonts. No remote OCR/CDN is required at scan time. The runtime image also installs native Tesseract/English data for Python OCR.
 - Original scans and application recovery points are encrypted with a stable Fernet `BACKUP_KEY`, in private local storage or S3-compatible storage. The encryption key must outlive container replacement.

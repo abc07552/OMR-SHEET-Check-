@@ -30,16 +30,23 @@ def scan_exam(questions=20, options=5):
 
 def sheet_image(exam, selections=None, qr=True, page=0):
     canvas = np.full((HEIGHT, WIDTH, 3), 255, dtype=np.uint8)
-    for p in ANCHORS:
-        cv2.rectangle(canvas, (p["x"] - 17, p["y"] - 17), (p["x"] + 16, p["y"] + 16), (10, 10, 10), -1)
+    for p in (exam.get("layout") or {}).get("anchors", ANCHORS):
+        x, y = round(p["x"]), round(p["y"])
+        cv2.rectangle(canvas, (x - 17, y - 17), (x + 16, y + 16), (10, 10, 10), -1)
     cv2.putText(canvas, "QA ANSWER SHEET", (85, 160), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (20, 20, 20), 2)
     per = (exam.get("layout") or {}).get("questionsPerPage", min(100, exam["questions"]))
     for q in range(min(per, exam["questions"] - page * per)):
         y, xs, radius = position(q, exam, page)
         for i, x in enumerate(xs):
-            cv2.circle(canvas, (round(x), round(y)), round(radius), (65, 65, 65), 2)
-            if selections and "ABCDE"[i] in selections[q]:
-                cv2.circle(canvas, (round(x), round(y)), round(radius) - 1, (15, 15, 15), -1)
+            if (exam.get("layout") or {}).get("bubbleShape") == "square":
+                left, top, r = round(x), round(y), round(radius)
+                cv2.rectangle(canvas, (left - r, top - r), (left + r, top + r), (65, 65, 65), 2)
+                if selections and "ABCDE"[i] in selections[q]:
+                    cv2.rectangle(canvas, (left - r + 1, top - r + 1), (left + r - 1, top + r - 1), (15, 15, 15), -1)
+            else:
+                cv2.circle(canvas, (round(x), round(y)), round(radius), (65, 65, 65), 2)
+                if selections and "ABCDE"[i] in selections[q]:
+                    cv2.circle(canvas, (round(x), round(y)), round(radius) - 1, (15, 15, 15), -1)
     if qr:
         meta = {
             "m": 2,

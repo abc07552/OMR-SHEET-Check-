@@ -87,3 +87,24 @@ def test_competition_ranks_percentile_and_population_sd(exam, result):
     assert report["rankings"][0]["percentile"] == pytest.approx(100 / 3)
     assert report["questions"][0]["total"] == 3
     assert report["questions"][0]["difficulty"] == pytest.approx(200 / 3)
+
+
+def test_percentiles_use_strictly_lower_percentages_even_when_set_maxima_differ(exam, result):
+    exam["answers"] = ["A"] * 5
+    exam["negativeMarks"] = 0
+    exam["questionSets"] = [
+        {"code": "A", "answers": [["A"]] * 5},
+        {"code": "B", "answers": [["A"], None, None, None, None]},
+    ]
+    responses = [
+        dict(result, id="ten-of-ten", questionSet="A", answers=["A"] * 5),
+        dict(result, id="two-of-two", questionSet="B", answers=["A"] * 5),
+        dict(result, id="two-of-ten", questionSet="A", answers=["A", "B", "B", "B", "B"]),
+        dict(result, id="zero", questionSet="A", answers=["B"] * 5),
+        dict(result, id="review", questionSet="A", answers=["A"] * 5, flagged=[0]),
+    ]
+    report = analytics(responses, exam)
+    ranked = {r["id"]: r for r in report["rankings"]}
+    assert (report["evaluated"], report["review"]) == (4, 1)
+    assert [ranked[k]["rank"] for k in ("ten-of-ten", "two-of-two", "two-of-ten", "zero")] == [1, 2, 2, 4]
+    assert [ranked[k]["percentile"] for k in ("ten-of-ten", "two-of-two", "two-of-ten", "zero")] == [50, 50, 25, 0]

@@ -123,7 +123,9 @@ def order_quad(points):
 
 def markers(image, reference):
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    binary = cv2.threshold(gray, 90, 255, cv2.THRESH_BINARY_INV)[1]
+    # Local contrast, not a fixed brightness cutoff: readable corner ink can be
+    # above 90 in an overexposed photo while the paper can be below 90 in shadow.
+    binary = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 61, 12)
     contours = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0]
     height, width = gray.shape
     expected_area = 34 * 34 * width * height / (WIDTH * HEIGHT)
@@ -173,8 +175,9 @@ def paper_quad(image):
 
 
 def ring_quality(gray, exam):
-    # Printed outline circles, independent of the selected or correct option.
-    count = min(24, (exam.get("layout") or default_layout(exam))["questionsPerPage"], exam["questions"])
+    # Printed outlines, independent of the selected or correct option.
+    layout = exam.get("layout") or default_layout(exam)
+    count = min(24, layout["questionsPerPage"], exam["questions"])
     quality = []
     for q in range(count):
         y, xs, radius = position(q, exam)
@@ -185,7 +188,9 @@ def ring_quality(gray, exam):
             if roi.shape != (2 * r + 1, 2 * r + 1):
                 continue
             yy, xx = np.ogrid[-r : r + 1, -r : r + 1]
-            dist = np.sqrt(xx * xx + yy * yy)
+            dist = (
+                np.maximum(np.abs(xx), np.abs(yy)) if layout["bubbleShape"] == "square" else np.sqrt(xx * xx + yy * yy)
+            )
             ring = (dist >= radius - 1.8) & (dist <= radius + 1.8)
             outer = (dist > radius + 2) & (dist <= radius + 4)
             if ring.any() and outer.any():
@@ -303,11 +308,15 @@ def scan_image(data: bytes, exam: dict, page_index=0, ocr=True):
         raise ScanError("The question set is not configured for this examination.", "set_mismatch")
     gray = cv2.cvtColor(aligned, cv2.COLOR_BGR2GRAY)
     # Local illumination normalization and two independent thresholds reduce shadows.
-    background = cv2.GaussianBlur(gray, (0, 0), 23)
+    radius = layout["radius"]
+    background = cv2.GaussianBlur(gray, (0, 0), max(23, radius * 2))
     normalized = cv2.divide(gray, np.maximum(background, 1), scale=255)
     normalized = cv2.medianBlur(normalized, 3)
-    adaptive = cv2.adaptiveThreshold(normalized, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 35, 12)
-    absolute = cv2.threshold(gray, 145, 255, cv2.THRESH_BINARY_INV)[1]
+    # The neighborhood must surround even the designer's largest filled bubble;
+    # a fixed 35px window mistakes a large uniformly dark interior for paper.
+    block = max(35, 2 * math.ceil(radius * 2.2) + 1)
+    adaptive = cv2.adaptiveThreshold(normalized, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, block, 12)
+    absolute = cv2.threshold(normalized, 145, 255, cv2.THRESH_BINARY_INV)[1]
     answers, flagged, detections, selected_options, confidences = [], [], [], [], []
     inverse = np.linalg.inv(registration.matrix)
     overlay = aligned.copy()

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import statistics
+from bisect import bisect_left
 from collections import Counter
 from decimal import Decimal
 
@@ -155,6 +156,9 @@ def analytics(results, exam):
         key=lambda pair: (-pair[1]["score"], pair[0]["name"].casefold(), pair[0]["id"]),
     )
     percentages = [g["percentage"] for _, g in valid]
+    # One sorted index replaces an O(n²) scan for every student's percentile.
+    # This must use percentages, not rank/score: sets may have different maxima.
+    sorted_percentages = sorted(percentages)
     ranked = []
     last_score, rank = None, 0
     for i, (r, g) in enumerate(valid):
@@ -168,7 +172,7 @@ def analytics(results, exam):
                 "roll": r["roll"],
                 "section": r["section"],
                 "rank": rank,
-                "percentile": sum(x < g["percentage"] for x in percentages) / len(valid) * 100,
+                "percentile": bisect_left(sorted_percentages, g["percentage"]) / len(valid) * 100,
                 **{k: v for k, v in g.items() if k not in ("questions", "fingerprint", "ruleVersion")},
             }
         )

@@ -401,6 +401,88 @@ test("genuine enterprise workflows, restricted portals, reports and encrypted of
     await saved(page);
   });
 
+  await test.step("browser OpenCV reads exposure variants and a sharp QR cannot certify a missing bubble grid", async () => {
+    const directory = info.outputPath("optical-conditions");
+    execFileSync(
+      process.env.OMR_TEST_PYTHON || path.resolve(".venv/bin/python"),
+      [
+        "-c",
+        `import json,sys
+from pathlib import Path
+from backend.tests.test_omr import png,sheet_image
+from backend.tests.test_omr_conditions import exposure
+exam=json.loads(sys.stdin.read())
+root=Path(sys.argv[1]); root.mkdir(parents=True,exist_ok=True)
+image=sheet_image(exam,[[option] for option in "ABCDE"])
+for condition in ("dark","overexposed","shadow","faded-print"):
+    (root / (condition + ".png")).write_bytes(png(exposure(image,condition)))
+image[380:1500,100:1150]=255
+(root / "sharp-qr-missing-grid.png").write_bytes(png(image))`,
+        directory,
+      ],
+      { input: JSON.stringify(primaryExam) },
+    );
+    await navigate(page, "scanner");
+    await page.getByLabel("Current assessment").selectOption(examId);
+    await page
+      .getByRole("combobox", { name: "Detection engine", exact: true })
+      .selectOption("opencv");
+    await page
+      .getByLabel("Read roll numbers with OCR", { exact: true })
+      .uncheck();
+    await page
+      .getByLabel("Replace a previously scanned page", { exact: true })
+      .check();
+    await expect(page.locator(".scan-tip")).toContainText(
+      "encrypted and retained",
+    );
+    for (const condition of ["dark", "overexposed", "shadow", "faded-print"]) {
+      await page
+        .getByLabel("Upload OMR sheets or PDF", { exact: true })
+        .setInputFiles(path.join(directory, `${condition}.png`));
+      await page
+        .getByLabel(`Roll number for ${condition}.png`, { exact: true })
+        .fill("10001");
+      await page
+        .getByRole("button", { name: "Scan 1 page", exact: true })
+        .click();
+      await expect(page.locator(".scan-queue-item.done")).toHaveCount(1, {
+        timeout: 90_000,
+      });
+      await saved(page);
+      const result = (await state()).workspace.results.find(
+        (r: { id: string }) => r.id === studentResultId,
+      );
+      expect(result.engine).toBe("opencv");
+      expect(result.answers).toEqual(["A", "B", "C", "D", "E"]);
+      expect(
+        result.answerMeta.every((row: { verified: boolean }) => !row.verified),
+      ).toBe(true);
+      await page
+        .getByRole("button", { name: "Clear queue", exact: true })
+        .click();
+    }
+    const before = await state();
+    await page
+      .getByLabel("Upload OMR sheets or PDF", { exact: true })
+      .setInputFiles(path.join(directory, "sharp-qr-missing-grid.png"));
+    await page
+      .getByLabel("Roll number for sharp-qr-missing-grid.png", { exact: true })
+      .fill("10001");
+    await page
+      .getByRole("button", { name: "Scan 1 page", exact: true })
+      .click();
+    await expect(page.locator(".scan-queue-item.error")).toContainText(
+      /printed bubble grid.*blurred/,
+    );
+    const after = await state();
+    expect(after.revision).toBe(before.revision);
+    expect(after.workspace.results).toEqual(before.workspace.results);
+    await page
+      .getByRole("button", { name: "Clear queue", exact: true })
+      .click();
+  });
+
   await test.step("teacher assignments and student publication/privacy are enforced by real APIs and screens", async () => {
     const teacher = await browser.newContext({
       baseURL: test.info().project.use.baseURL,

@@ -50,7 +50,7 @@ jobs:
         run: |
           npm ci
           python -m venv .venv
-          .venv/bin/python -m pip install -r backend/requirements-dev.lock
+          .venv/bin/python -m pip install --require-hashes --only-binary=:all: -r backend/requirements-dev.lock
           npx playwright install --with-deps chromium
           mkdir -p .cache/qa
       - name: Formatting and Python lint
@@ -70,8 +70,9 @@ jobs:
         run: |
           npm audit --audit-level=low
           .venv/bin/pip check
-          .venv/bin/pip-audit -r backend/requirements.lock --no-deps --disable-pip --vulnerability-service pypi
-          .venv/bin/pip-audit -r backend/requirements-dev.lock --no-deps --disable-pip --vulnerability-service pypi
+          .venv/bin/bandit -r backend -x backend/tests,backend/migrations
+          .venv/bin/pip-audit -r backend/requirements.lock --require-hashes --disable-pip --vulnerability-service pypi
+          .venv/bin/pip-audit -r backend/requirements-dev.lock --require-hashes --disable-pip --vulnerability-service pypi
       - name: Retain synthetic QA failure evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

@@ -115,6 +115,7 @@ export default function Overview({
   onExport,
   onQuestion,
 }: Props) {
+  const session = useSession();
   const [metric, setMetric] = useState<"average" | "passRate">("average");
   const [chartRange, setChartRange] = useState("6");
   const stats = getStats(results, exam);
@@ -628,10 +629,11 @@ export default function Overview({
         <span className="tiny-brand">✳</span> Made for the moments that move
         learning forward.
         <span>
-          {workspace.results.some((r) => r.source === "demo")
-            ? "Sample workspace"
-            : "Your local workspace"}{" "}
-          · Data stays on your device
+          {session.phase === "authenticated"
+            ? session.offline
+              ? "Offline school workspace · check synchronization status"
+              : "School workspace · server-backed records"
+            : `${workspace.results.some((r) => r.source === "demo") ? "Sample workspace" : "Your local workspace"} · device-only records`}
         </span>
       </div>
     </>

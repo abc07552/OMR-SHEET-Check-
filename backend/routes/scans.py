@@ -6,7 +6,7 @@ from datetime import timedelta
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session
 
 from .. import models as m
@@ -253,7 +253,7 @@ def retry_job(
         raise HTTPException(404, "Scan job not found.")
     if job.status != "error":
         raise HTTPException(409, "Only failed jobs can be retried.")
-    if job.attempt >= 5:
+    if job.attempt >= MAX_SCAN_ATTEMPTS:
         raise HTTPException(400, "This image has failed five times. Replace it with a clearer image.")
     job.status, job.error, job.error_category, job.claimed_at = "queued", "", "", None
     audit(db, school_id, user.id, "Retried scan job", jobId=job_id)
@@ -261,49 +261,119 @@ def retry_job(
     return {"ok": True}
 
 
+MAX_SCAN_ATTEMPTS = 5
+SCAN_LEASE = timedelta(minutes=15)
+
+
+def authorized_batch_exam(db, batch):
+    if not batch:
+        raise HTTPException(404, "The scan batch no longer exists.")
+    user = db.get(m.User, batch.user_id)
+    if not user or not user.active:
+        raise HTTPException(403, "The batch owner's account is suspended.")
+    mem = membership(db, user, batch.school_id, "staff", "scan")
+    return allowed_exam(db, batch.school_id, mem, batch.exam_id, "scan")
+
+
 def process_one(app):
-    job_id = None
+    # The monotonically increasing attempt is a fencing token. A slow worker can
+    # outlive its lease; neither its success nor its error may replace a newer run.
     with app.state.sessions() as db:
-        cutoff = m.now() - timedelta(minutes=15)
+        expired = or_(m.ScanJob.claimed_at.is_(None), m.ScanJob.claimed_at < m.now() - SCAN_LEASE)
         db.execute(
             update(m.ScanJob)
-            .where(m.ScanJob.status == "processing", m.ScanJob.claimed_at < cutoff)
+            .where(
+                or_(m.ScanJob.status == "queued", (m.ScanJob.status == "processing") & expired),
+                m.ScanJob.attempt >= MAX_SCAN_ATTEMPTS,
+            )
+            .values(
+                status="error",
+                claimed_at=None,
+                error="This page exhausted five processing attempts after interrupted workers. Upload a clearer image or contact your operator with the job ID.",
+                error_category="lease_exhausted",
+            )
+        )
+        db.execute(
+            update(m.ScanJob)
+            .where(m.ScanJob.status == "processing", expired, m.ScanJob.attempt < MAX_SCAN_ATTEMPTS)
             .values(status="queued", claimed_at=None)
         )
         job = db.scalar(
             select(m.ScanJob)
-            .where(m.ScanJob.status == "queued")
-            .order_by(m.ScanJob.created_at)
+            .where(m.ScanJob.status == "queued", m.ScanJob.attempt < MAX_SCAN_ATTEMPTS)
+            .order_by(m.ScanJob.created_at, m.ScanJob.id)
             .with_for_update(skip_locked=True)
             .limit(1)
         )
         if not job:
             db.commit()
             return False
+        attempt = job.attempt + 1
         claim = db.execute(
             update(m.ScanJob)
-            .where(m.ScanJob.id == job.id, m.ScanJob.status == "queued")
-            .values(status="processing", claimed_at=m.now(), attempt=m.ScanJob.attempt + 1)
+            .where(m.ScanJob.id == job.id, m.ScanJob.status == "queued", m.ScanJob.attempt == job.attempt)
+            .values(status="processing", claimed_at=m.now(), attempt=attempt)
         )
         if claim.rowcount != 1:
             db.rollback()
             return True
-        job_id, batch, obj = job.id, db.get(m.ScanBatch, job.batch_id), db.get(m.StoredObject, job.object_id)
-        settings = dict(job.settings)
-        try:
-            user = db.get(m.User, batch.user_id)
-            if not user or not user.active:
-                raise HTTPException(403, "The batch owner's account is suspended.")
-            mem = membership(db, user, batch.school_id, "staff", "scan")
-            exam = allowed_exam(db, batch.school_id, mem, batch.exam_id, "scan")
-            exam_payload = exam.payload
+        job_id, batch_id, object_id, settings = job.id, job.batch_id, job.object_id, dict(job.settings)
+        db.commit()
+
+    output, error, category = {}, "", ""
+    try:
+        # Do not retain a pooled connection or database transaction during CV/OCR.
+        with app.state.sessions() as db:
+            exam = authorized_batch_exam(db, db.get(m.ScanBatch, batch_id))
+            exam_payload = dict(exam.payload)
+            obj = db.get(m.StoredObject, object_id)
+            if not obj:
+                raise ScanError("The retained original is missing. Contact your operator.", "storage")
             key = obj.key
-            db.commit()
-            data = app.state.store.get(key, decrypt=True)
-            output = scan_image(data, exam_payload, settings.get("pageIndex", 0), settings.get("ocr", True))
-            output["objectId"] = obj.id
-            job = db.get(m.ScanJob, job_id)
-            job.status, job.output, job.error, job.error_category = "done", output, "", ""
+        data = app.state.store.get(key, decrypt=True)
+        output = scan_image(data, exam_payload, settings.get("pageIndex", 0), settings.get("ocr", True))
+        output["objectId"] = object_id
+    except (ScanError, HTTPException) as exc:
+        error = str(exc.detail if isinstance(exc, HTTPException) else exc)[:1000]
+        category = exc.category if isinstance(exc, ScanError) else "authorization"
+    except Exception:
+        logger.exception("Batch scan failed: %s, attempt %s", job_id, attempt)
+        error = "The scan engine failed. Retry this page or contact your server operator with the job ID."
+        category = "engine"
+
+    with app.state.sessions() as db:
+        current_claim = (
+            m.ScanJob.id == job_id,
+            m.ScanJob.status == "processing",
+            m.ScanJob.attempt == attempt,
+        )
+        job = db.scalar(select(m.ScanJob).where(*current_claim).with_for_update())
+        if not job:
+            logger.info("Discarded superseded scan completion: %s, attempt %s", job_id, attempt)
+            return True
+        batch = db.get(m.ScanBatch, batch_id)
+        if not error:
+            try:
+                # Fresh session: account suspension, permissions and class assignments
+                # may have changed while a long CV/OCR operation was running.
+                authorized_batch_exam(db, batch)
+            except HTTPException as exc:
+                error, category = str(exc.detail)[:1000], "authorization"
+        completion = db.execute(
+            update(m.ScanJob)
+            .where(*current_claim)
+            .values(
+                status="error" if error else "done",
+                output={} if error else output,
+                error=error,
+                error_category=category,
+                claimed_at=None,
+            )
+        )
+        if completion.rowcount != 1:
+            db.rollback()
+            return True
+        if not error:
             audit(
                 db,
                 batch.school_id,
@@ -311,21 +381,8 @@ def process_one(app):
                 "Completed batch image scan",
                 batchId=batch.id,
                 jobId=job_id,
+                attempt=attempt,
                 flagged=len(output["flagged"]),
-            )
-        except (ScanError, HTTPException) as exc:
-            job = db.get(m.ScanJob, job_id)
-            job.status = "error"
-            job.error = str(exc.detail if isinstance(exc, HTTPException) else exc)[:1000]
-            job.error_category = exc.category if isinstance(exc, ScanError) else "authorization"
-        except Exception:
-            logger.exception("Batch scan failed: %s", job_id)
-            db.rollback()
-            job = db.get(m.ScanJob, job_id)
-            job.status, job.error, job.error_category = (
-                "error",
-                "The scan engine failed. Retry this page or contact your server operator with the job ID.",
-                "engine",
             )
         db.commit()
     return True

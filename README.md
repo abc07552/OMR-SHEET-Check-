@@ -12,7 +12,7 @@ Prerequisites: Node 22.13+ (Node 24 recommended), CPython 3.11, and PostgreSQL f
 npm ci
 npm run build
 python3.11 -m venv .venv
-.venv/bin/pip install -r backend/requirements.lock
+.venv/bin/pip install --require-hashes --only-binary=:all: -r backend/requirements.lock
 
 # Development/local fallback creates a SEPARATE .data/enterprise.sqlite.
 # Prefer a dedicated PostgreSQL database for shared use:
@@ -45,7 +45,7 @@ Production requires `APP_ENV=production`, a PostgreSQL `DATABASE_URL`, a stable 
 - Optional encrypted staff/student offline vaults with separate passphrases, 24-hour authorization, account/scope isolation, retained originals and conflict-aware synchronization. A stale revision blocks, preserves unsent data and requires explicit reconciliation; it never silently overwrites a newer server version.
 - Validated institution defaults/contact/logo, service health, audit and sync journals, encrypted recovery points, local/S3-compatible object storage and SMTP recovery configuration.
 
-Some API capabilities have stronger automated coverage than their browser workflows. Read the ledger rather than treating this list as verification of every device, photo or deployment.
+Some API capabilities have stronger automated coverage than their browser workflows. Read the [19-stage acceptance map](documentation/ACCEPTANCE.md), [security review](documentation/SECURITY_AUDIT.md) and [measured performance report](documentation/PERFORMANCE.md) rather than treating this list as verification of every device, photo or deployment. Configurable clock-driven backups and richer report-template editing remain explicit product gaps; physical-device, load and production-operations acceptance remain gated.
 
 ## Scanning and privacy notes
 
@@ -60,10 +60,11 @@ A lost offline passphrase cannot be recovered. Server-side encrypted originals/r
 ```sh
 npm run test:all                     # frontend/unit + preserved Node regression tests
 npm run build                       # strict TypeScript, Vite, PWA generation
-.venv/bin/pip install -r backend/requirements-dev.lock
-.venv/bin/ruff check backend
-.venv/bin/ruff format --check backend
+.venv/bin/pip install --require-hashes --only-binary=:all: -r backend/requirements-dev.lock
+.venv/bin/ruff check backend scripts
+.venv/bin/ruff format --check backend scripts
 .venv/bin/pytest -q backend/tests    # SQLite + genuine OpenCV tests
+.venv/bin/bandit -r backend -x backend/tests,backend/migrations
 
 # Also run the database-parametrized API suite on a dedicated QA PostgreSQL DB:
 OMR_TEST_POSTGRES_URL='postgresql://user:password@host/qa_db' .venv/bin/pytest -q backend/tests

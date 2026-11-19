@@ -9,7 +9,7 @@ Locally inspected development environment: Node 22.22.3/npm 10.9.8, CPython 3.11
 ```sh
 npm ci
 python3.11 -m venv .venv
-.venv/bin/pip install -r backend/requirements-dev.lock
+.venv/bin/pip install --require-hashes --only-binary=:all: -r backend/requirements-dev.lock
 npx playwright install --with-deps chromium
 
 npm run format:check
@@ -21,11 +21,11 @@ npm run build
 
 npm audit
 .venv/bin/pip check
-.venv/bin/pip-audit -r backend/requirements.lock --no-deps --disable-pip --vulnerability-service pypi
-.venv/bin/pip-audit -r backend/requirements-dev.lock --no-deps --disable-pip --vulnerability-service pypi
+.venv/bin/pip-audit -r backend/requirements.lock --require-hashes --disable-pip --vulnerability-service pypi
+.venv/bin/pip-audit -r backend/requirements-dev.lock --require-hashes --disable-pip --vulnerability-service pypi
 ```
 
-The audit commands read the **fully pinned runtime and development closures** without resolving dependencies. Hash-locked downloads are not yet implemented; the tool warns about that. A clean advisory scan is a point-in-time result, not a penetration-test or supply-chain certification. Do not suppress an advisory or an unavailable audit service to make CI appear green.
+The audit commands read the **fully pinned, SHA-256 hash-locked runtime and development closures** without resolving new dependencies. CI and Docker require hashes and wheels; a clean CPython 3.11 environment was installed with those exact restrictions, and an intentionally incorrect hash was rejected. Regenerate only from an intentionally installed/tested environment with `scripts/lock-python.py`; it verifies installed specifiers and reads non-yanked PyPI artifact hashes before replacing either lock. This does not provide signed publisher/build provenance. A clean advisory scan is a point-in-time result, not a penetration-test or supply-chain certification. Do not suppress an advisory or an unavailable audit service to make CI appear green.
 
 `npm test` deliberately uses `vitest run src`. Unrestricted Vitest collection also picks up the separate `node:test` suites; use `npm run test:server` for those preserved regressions.
 
@@ -77,16 +77,32 @@ Advanced overrides:
 4. A raster image containing **real drawn ink**, QR and registration markers goes through the actual native OpenCV worker. The deliberately double-marked response remains unverified; applying a page requires explicit student/identity verification. Original bytes and `no-store` headers are checked.
 5. Result evidence/overlay opens; a human correction changes the saved selection and actual evaluation history. Applying/reloading a batch must not switch the selected assessment.
 6. Real PDF/XLSX/CSV downloads and editable institution settings; checks include file signatures and CSV content, not just success toasts.
-7. Teacher projection excludes the other class; unauthorized record access is rejected. Student publication starts private, becomes visible only after an administrator publishes, and another learner's report remains forbidden. Desktop portal statistic cards share a baseline.
-8. Service-worker cache includes the PDF `.mjs` worker and excludes `/api` responses. An encrypted offline edit survives full reload/passphrase unlock. A downloaded blank OMR PDF is rasterized and genuinely scanned by OpenCV.js **while disconnected**. Its measured blank answers, engine and retained original are checked after reconnect/upload/materialization.
-9. Six enterprise screens at 1440/768/390 pixels in dark and light themes (36 combinations), with no document overflow. Screenshots are retained for visual review.
-10. No uncaught page errors. Console errors fail except specifically expected disconnected-network requests and initial unauthorized session checks. These exceptions are not general error suppression.
+7. Four real marked-image exposure variants (dark/overexposed/shadow/faded print) pass through browser OpenCV.js and retain the measured A–E selections with verification still false. A sharp QR/marker image with its bubble grid removed is rejected visibly, without changing any result or workspace revision. The scanner discloses encrypted server-original retention accurately.
+8. Teacher projection excludes the other class; unauthorized record access is rejected. Student publication starts private, becomes visible only after an administrator publishes, and another learner's report remains forbidden. Desktop portal statistic cards share a baseline.
+9. Service-worker cache includes the PDF `.mjs` worker and excludes `/api` responses. An encrypted offline edit survives full reload/passphrase unlock. A downloaded blank OMR PDF is rasterized and genuinely scanned by OpenCV.js **while disconnected**. Its measured blank answers, engine and retained original are checked after reconnect/upload/materialization.
+10. Six enterprise screens at 1440/768/390 pixels in dark and light themes (36 combinations), with no document overflow. Screenshots are retained for visual review.
+11. No uncaught page errors. Console errors fail except specifically expected disconnected-network requests and initial unauthorized session checks. These exceptions are not general error suppression.
 
 The hook regressions in `src/session.test.tsx` additionally record render-time save status (before passive effects), delayed encrypted writes, rapid undo before submission, offline undo, and undo during original-image materialization. A "saved" badge must not precede server acknowledgment; "queued" must not precede the current encrypted write. Existing lost-ack receipt, stale-revision preservation, authorization reduction and deferred-logout checks remain enabled.
 
 This does **not** establish arbitrary-photo accuracy, OCR correctness on every identity, physical Android behavior, all report categories, every authorization race, install-prompt/update lifecycle, or cloud reliability. The real-ink image is a deterministic fixture, not a production accuracy corpus; detection is never mocked or derived from the answer key. The offline PDF is intentionally blank and therefore checks blank detection, PDF/WASM/OCR asset availability and synchronization rather than a second full marked-answer accuracy corpus.
 
 Failure artifacts: `.cache/qa/e2e-artifacts/` includes screenshots, an accessibility snapshot and a Playwright trace on failure. Open a trace locally with `npx playwright show-trace <trace.zip>`. A trace can contain QA cookies, requests and synthetic credentials; never publish traces from real student sessions.
+
+## Optical, worker-lease and dependency-integrity regressions
+
+- `backend/tests/test_omr{,_conditions}.py`: **34 genuine native-CV cases**, including all option counts, rotation/perspective, dark/bright/shadow/faded exposure, circles/squares at radius 5–25, JPEG/half-resolution input, empty/residual/partial/multiple/crossed marks, safe blur rejection/review, wrong templates, answer-key independence and the last page of a 500-question/five-page form. Generated fixtures are test pixels, not generated answers: the engine itself measures them.
+- `src/omr.test.ts` / `omrQuality.test.ts`: actual pixel exposure/blank/invalid-sampling regressions and shape-aware, answer/QR-independent outline contrast. QR orientation hints cannot substitute for a readable grid.
+- `backend/tests/test_scan_leases.py`: seven cases run on **both databases**, deliberately delaying real CV. They reproduce an expired worker overwriting a newer applied job, three mid-processing authorization reductions, missing/expired lease exhaustion and stale error completion. All seven were observed failing before the attempt-fenced/fresh-authorization fix; no CV answers are mocked.
+- `backend/tests/test_dependency_lock.py`: specifier/extras/platform-marker checks, invalid registry identity/hash refusal, yanked-file handling and failure preserving both existing lock files.
+- `backend/tests/test_scoring.py`: decimal rules, ties/strict-lower percentiles/review exclusion, and different keyed maxima where score order is not percentage order.
+
+```sh
+.venv/bin/bandit -r backend -x backend/tests,backend/migrations
+.venv/bin/python scripts/benchmark.py --records 1000 5000 --questions 20 --iterations 3
+```
+
+See [SECURITY_AUDIT.md](SECURITY_AUDIT.md) and [PERFORMANCE.md](PERFORMANCE.md) for exact executed findings, benchmarks and their limits. The benchmark opens no school database and imposes no noisy-runner timing threshold; it checks correctness as well as measuring wall time.
 
 ## Migration and trusted recovery drills
 

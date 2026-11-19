@@ -27,7 +27,7 @@ RUN apt-get update \
     && useradd --uid 10001 --gid omr --create-home omr \
     && install -d -m 0700 -o omr -g omr /app/data
 COPY backend/requirements.lock ./backend/requirements.lock
-RUN python -m pip install --no-cache-dir -r backend/requirements.lock
+RUN python -m pip install --no-cache-dir --require-hashes --only-binary=:all: -r backend/requirements.lock
 COPY backend ./backend
 COPY alembic.ini ./alembic.ini
 COPY public/fonts ./public/fonts

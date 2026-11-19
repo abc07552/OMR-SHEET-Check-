@@ -353,13 +353,39 @@ export function findMarkers(
       x1 = Math.min(width, x0 + Math.ceil(0.24 * width));
     const y0 = Math.floor(ry * height),
       y1 = Math.min(height, y0 + Math.ceil(0.24 * height));
-    const visited = new Uint8Array((x1 - x0) * (y1 - y0));
-    const rw = x1 - x0;
+    const rw = x1 - x0,
+      rh = y1 - y0,
+      stride = rw + 1,
+      integral = new Float64Array(stride * (rh + 1)),
+      ink = new Uint8Array(rw * rh),
+      visited = new Uint8Array(rw * rh),
+      radius = Math.max(6, Math.round((30 * width) / WIDTH));
+    for (let y = 0; y < rh; y++) {
+      let row = 0;
+      for (let x = 0; x < rw; x++) {
+        row += gray(x0 + x, y0 + y);
+        integral[(y + 1) * stride + x + 1] = integral[y * stride + x + 1] + row;
+      }
+    }
+    for (let y = 0; y < rh; y++)
+      for (let x = 0; x < rw; x++) {
+        const left = Math.max(0, x - radius),
+          right = Math.min(rw, x + radius + 1),
+          top = Math.max(0, y - radius),
+          bottom = Math.min(rh, y + radius + 1),
+          sum =
+            integral[bottom * stride + right] -
+            integral[top * stride + right] -
+            integral[bottom * stride + left] +
+            integral[top * stride + left],
+          localPaper = sum / ((right - left) * (bottom - top));
+        ink[y * rw + x] = gray(x0 + x, y0 + y) < localPaper - 12 ? 1 : 0;
+      }
     let best: { point: Point; score: number } | null = null;
     for (let y = y0; y < y1; y++)
       for (let x = x0; x < x1; x++) {
         const idx = (y - y0) * rw + x - x0;
-        if (visited[idx] || gray(x, y) > 90) continue;
+        if (visited[idx] || !ink[idx]) continue;
         const queue: number[] = [x, y];
         visited[idx] = 1;
         let head = 0,
@@ -388,7 +414,7 @@ export function findMarkers(
           ]) {
             if (nx < x0 || nx >= x1 || ny < y0 || ny >= y1) continue;
             const ni = (ny - y0) * rw + nx - x0;
-            if (!visited[ni] && gray(nx, ny) < 90) {
+            if (!visited[ni] && ink[ni]) {
               visited[ni] = 1;
               queue.push(nx, ny);
             }
@@ -466,36 +492,71 @@ function sampleBubbles(
     confidences: number[] = [],
     answerMeta: AnswerDetection[] = [],
     detectedOptions: Option[][] = [];
+  const square = getLayout(exam).bubbleShape === "square";
+  const brightnessAt = (x: number, y: number) => {
+    const p = map(x, y),
+      px = Math.round(p.x),
+      py = Math.round(p.y);
+    if (
+      !Number.isFinite(px) ||
+      !Number.isFinite(py) ||
+      px < 0 ||
+      py < 0 ||
+      px >= data.width ||
+      py >= data.height
+    )
+      return undefined;
+    const i = (py * data.width + px) * 4;
+    return (data.data[i] + data.data[i + 1] + data.data[i + 2]) / 3;
+  };
   for (let q = 0; q < pageQuestionCount(exam, page); q++) {
     const l = questionPosition(q, exam, page),
-      darkness = l.xs.map((x) => {
+      measurements = l.xs.map((x) => {
+        // Estimate nearby paper, not a fixed global brightness. The upper
+        // quartile avoids an outline, adjacent mark or text darkening the baseline.
+        const paper: number[] = [];
+        for (let i = 0; i < 24; i++) {
+          const angle = (i * Math.PI * 2) / 24,
+            dx = Math.cos(angle),
+            dy = Math.sin(angle),
+            distance =
+              (l.radius + 4) /
+              (square ? Math.max(Math.abs(dx), Math.abs(dy)) : 1),
+            value = brightnessAt(x + dx * distance, l.y + dy * distance);
+          if (value !== undefined) paper.push(value);
+        }
+        paper.sort((a, b) => a - b);
+        const background = paper[Math.floor(paper.length * 0.75)] || 0,
+          cutoff = background - Math.max(12, background * 0.15);
         let dark = 0,
-          total = 0;
+          total = 0,
+          invalid = paper.length < 20 || background < 25;
         const r = l.radius * 0.58;
         for (let sy = -r; sy <= r; sy += 1.5)
           for (let sx = -r; sx <= r; sx += 1.5) {
-            if (sx * sx + sy * sy > r * r) continue;
-            const p = map(x + sx, l.y + sy),
-              px = Math.round(p.x),
-              py = Math.round(p.y);
-            if (px < 0 || py < 0 || px >= data.width || py >= data.height)
+            if (!square && sx * sx + sy * sy > r * r) continue;
+            const value = brightnessAt(x + sx, l.y + sy);
+            if (value === undefined) {
+              invalid = true;
               continue;
-            const i = (py * data.width + px) * 4;
-            if ((data.data[i] + data.data[i + 1] + data.data[i + 2]) / 3 < 155)
-              dark++;
+            }
+            if (value < cutoff) dark++;
             total++;
           }
-        return total ? dark / total : 0;
-      });
+        return { ratio: total ? dark / total : 0, invalid: invalid || !total };
+      }),
+      darkness = measurements.map((m) => m.ratio),
+      invalid = measurements.some((m) => m.invalid);
     const threshold = exam.layout?.threshold || 0.52;
-    const filled = darkness
-      .map((v, i) => ({ v, i }))
-      .filter((a) => a.v >= threshold);
+    const filled = invalid
+      ? []
+      : darkness.map((v, i) => ({ v, i })).filter((a) => a.v >= threshold);
     const selected = filled.map((f) => getOptions(exam)[f.i]);
     const maximum = Math.max(...darkness),
       others = darkness.filter((_, i) => i !== filled[0]?.i);
     let status: AnswerDetection["status"] = "blank";
-    if (filled.length > 1) status = "multiple";
+    if (invalid) status = "invalid";
+    else if (filled.length > 1) status = "multiple";
     else if (filled.length === 1)
       status =
         maximum < threshold + 0.12 || others.some((v) => v > 0.22)
@@ -504,8 +565,9 @@ function sampleBubbles(
     else if (maximum > 0.32) status = "partial";
     else if (maximum > 0.22) status = "erased";
     if (status !== "blank" && status !== "filled") flagged.push(q);
-    const confidence =
-      filled.length === 1
+    const confidence = invalid
+      ? 0
+      : filled.length === 1
         ? Math.max(0, maximum - Math.max(0, ...others))
         : filled.length
           ? 0

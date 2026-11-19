@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   analyzeImageData,
+  analyzeAlignedImageData,
   bubbleLayout,
   findMarkers,
   MARKERS,
@@ -97,6 +98,58 @@ describe("registration and perspective", () => {
   });
 });
 describe("automatic bubble recognition", () => {
+  it.each(["dark", "overexposed", "shadow", "faded-print"])(
+    "measures actual pixels against local paper brightness under %s conditions",
+    (condition) => {
+      const { image, fillBubble } = syntheticSheet(20);
+      const exam = makeExam(20);
+      for (let q = 0; q < 20; q++) fillBubble(q, q % 4);
+      for (let y = 0; y < image.height; y++)
+        for (let x = 0; x < image.width; x++) {
+          const i = (y * image.width + x) * 4;
+          let value = image.data[i];
+          if (condition === "dark") value *= 0.28;
+          else if (condition === "overexposed") value += 180;
+          else if (condition === "shadow")
+            value *= 0.27 + (0.73 * x) / image.width;
+          else value = value * 0.4 + 150;
+          image.data[i] = image.data[i + 1] = image.data[i + 2] = value;
+        }
+      const read = analyzeAlignedImageData(image, exam);
+      expect(read.answers).toEqual(exam.answers);
+      expect(read.flagged).toEqual([]);
+      expect(read.answerMeta.every((row) => !row.verified)).toBe(true);
+      expect(analyzeImageData(image, exam)).toEqual({
+        answers: exam.answers,
+        flagged: [],
+      });
+    },
+  );
+  it("does not invent filled answers on blank shadowed paper", () => {
+    const { image } = syntheticSheet(20);
+    for (let y = 0; y < image.height; y++)
+      for (let x = 0; x < image.width; x++) {
+        const i = (y * image.width + x) * 4;
+        const value = image.data[i] * (0.27 + (0.73 * x) / image.width);
+        image.data[i] = image.data[i + 1] = image.data[i + 2] = value;
+      }
+    const read = analyzeAlignedImageData(image, makeExam(20));
+    expect(read.answers).toEqual(Array(20).fill(null));
+    expect(read.detectedOptions.every((options) => !options.length)).toBe(true);
+    expect(read.flagged).toEqual([]);
+  });
+  it("flags clipped evidence as invalid instead of treating unsampled pixels as blank", () => {
+    const image = {
+      width: 100,
+      height: 100,
+      data: new Uint8ClampedArray(100 * 100 * 4).fill(255),
+      colorSpace: "srgb",
+    } as ImageData;
+    const read = analyzeAlignedImageData(image, makeExam(20));
+    expect(read.flagged).toHaveLength(20);
+    expect(read.answerMeta.every((row) => row.status === "invalid")).toBe(true);
+    expect(read.answers).toEqual(Array(20).fill(null));
+  });
   it.each([10, 20, 50, 60, 100])(
     "reads every filled bubble in a %i-question sheet",
     (count) => {
