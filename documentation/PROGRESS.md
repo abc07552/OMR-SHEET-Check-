@@ -26,7 +26,7 @@ Implemented and regression-tested since `cb6ad12`:
 
 ### Executed verification — 2026-11-17
 
-Local runtime inspected: **Node 22.22.3 / npm 10.9.8, CPython 3.11.2, PostgreSQL 16.2 QA**, Chromium 153 from the sandbox. CI/container definitions target Node 24/Python 3.11/PostgreSQL 17; those targets must be judged by their actual CI/container results, not inferred from local runs.
+Local runtime inspected: **Node 22.22.3 / npm 10.9.8, CPython 3.11.2, PostgreSQL 16.2 QA**, Chromium 153 from the sandbox. Node 24/Python 3.11/PostgreSQL 17 and container packaging were separately exercised by successful [GitHub run 44541435692](https://github.com/abc07552/OMR-SHEET-Check-/actions/runs/44541435692) for source checkpoint `ff57c72`, not inferred from the local runtime. Check the PR's latest-head checks as well; a past successful run does not certify subsequent changes.
 
 | Check                                          | Observed result                                                                                                                                                                                              |
 | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -42,6 +42,10 @@ Local runtime inspected: **Node 22.22.3 / npm 10.9.8, CPython 3.11.2, PostgreSQL
 | `pip check`                                    | No broken requirements                                                                                                                                                                                       |
 | Actual Node → PostgreSQL CLI/TTY drill         | Passed with two schools, two users, two 500-question records; source files unchanged; populated destination refused; interactive hidden-terminal recovery revoked sessions without printing the new password |
 
+Both jobs in that GitHub run completed successfully: full regressions/audits and the enterprise container smoke test. The latter built the image, validated Compose/Caddy, initialized real PostgreSQL, applied Alembic migrations, and checked non-root UID, native OCR executable availability, a non-superuser database connection and encrypted storage roundtrip. It did not deploy public HTTPS or external cloud services.
+
+A parallel PR run at `ff57c72` caught a **test-fixture isolation race**: the offline-undo test observed the in-memory cache before its encrypted write completed, and teardown replaced the fake IndexedDB factory while that captured write was still running. The next test correctly refused to overwrite the existing vault. Teardown now drains writes via `forgetVault` before changing fake databases, and the undo assertion waits for durable queued status. No production vault safeguard was removed and no test was skipped. The full 97-test frontend suite then passed three consecutive two-worker runs. Refer to current PR checks for the follow-up CI result.
+
 The committed Python maintenance regressions additionally exercise WAL-consistent backup/source fingerprints, same IDs/rolls across schools, five-page/A–E layouts, all 1,000 retained answer detections, template/evaluation/report preservation, legacy scrypt → Argon2id upgrade, no imported sessions, initially unassigned teachers, confirmation/source/destination guards and whole-transaction rollback when the second school is invalid.
 
 The actual CLI/TTY rehearsal used a **separate synthetic database created through the real preserved Node setup/workspace/account APIs**, not `.data/markly.sqlite`. It then invoked the Python CLI as a subprocess, verified scores/restrictions, and drove `reset-password` through a real pseudo-terminal. The new password was absent from the captured terminal transcript. This is distinct from the automated prompt-substitution unit tests, and not a migration of the user's installation.
@@ -50,7 +54,7 @@ Ignored local evidence includes `.cache/qa/continuation-{unit-tests,python-tests
 
 ### Interpretation and remaining acceptance work
 
-- Docker Engine is **not installed in the sandbox**. The image/Compose/Caddy configuration and CI smoke job are supplied, but local container execution is not claimed. Check the new GitHub workflow result before treating that packaging as verified. No permanent HTTPS/cloud/S3/SMTP deployment has been provisioned.
+- Docker Engine is **not installed in the sandbox**. Container verification ran in GitHub Actions, not locally; its successful image/Compose/Caddy/migration/storage smoke result is linked above. No permanent HTTPS/cloud/S3/SMTP deployment has been provisioned, and a smoke test is not production/device certification.
 - The latest production bundle still warns about large lazily loaded ExcelJS/PDF/OpenCV assets. It precaches about 22.6 MiB. There is no claim of a low-end Android memory/CPU/load-time benchmark or optimized production capacity.
 - The browser suite executes genuine native ink detection and a genuine **blank** offline PDF scan, not an arbitrary-photo accuracy corpus. Native Tesseract is absent on the local host; browser OCR assets are available, and the container is configured to install native OCR. Neither that configuration nor a synthetic fixture certifies OCR identity accuracy.
 - The 36 current responsive checks cover six enterprise screens. Earlier baseline tests (500 questions, multipage PDFs, browser OCR/camera and 99 page/viewport combinations) predate enterprise integration and are not counted as fresh all-screen/device acceptance.

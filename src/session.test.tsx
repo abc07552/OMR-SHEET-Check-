@@ -19,6 +19,7 @@ import * as offline from "./offline";
 import {
   cachedSchool,
   enableVault,
+  forgetVault,
   lockVault,
   saveOfflineImage,
   vaultEnabled,
@@ -118,9 +119,12 @@ beforeEach(() => {
     }),
   );
 });
-afterEach(() => {
+afterEach(async () => {
   cleanup();
   lockVault();
+  // Captured encryption writes deliberately survive a lock in production.
+  // Drain them against THIS fake database before the next test swaps factories.
+  await forgetVault(user.email);
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -232,6 +236,8 @@ describe("session and conflict-aware offline synchronization", () => {
     await waitFor(() =>
       expect(cachedSchool("s")?.workspace.teacher).toBe(baseline.teacher),
     );
+    // The in-memory projection changes before AES-GCM/IndexedDB commits.
+    await waitFor(() => expect(result.current.store.status).toBe("queued"));
     expect(puts).toHaveLength(0);
   });
   it("does not render an offline edit as queued until its encrypted write finishes", async () => {

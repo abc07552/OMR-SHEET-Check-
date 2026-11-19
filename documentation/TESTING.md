@@ -108,4 +108,6 @@ Before a real cutover, follow [MIGRATION.md](MIGRATION.md), rehearse with a priv
 
 `.github/workflows/verify.yml` defines locked-dependency, frontend/Node/Python/PostgreSQL/browser/audit checks plus a separate Docker/Compose/migration/non-root/container-encryption smoke job. Actions are pinned to verified upstream commit SHAs. CI creates only disposable records and retains evidence for seven days. Repository permissions/branch protection must be configured by its owner; the presence of this workflow is not evidence that a GitHub run passed.
 
+Both jobs in [run 44541435692](https://github.com/abc07552/OMR-SHEET-Check-/actions/runs/44541435692) passed for source checkpoint `ff57c72`, including real container execution. A parallel PR run exposed a test-only fake-IndexedDB teardown race; pending encryption is now drained before swapping factories, and assertions wait for durable queued status rather than only the in-memory cache. The vault's refusal to overwrite locked data was preserved. Check current PR-head results rather than treating that earlier success as evidence for every later commit.
+
 Current **executed** results, caveats and open deployment/device acceptance work are recorded in [PROGRESS.md](PROGRESS.md). Reproduce a failure, identify the cause, add a regression, fix it and rerun the affected checks before claiming it resolved.

@@ -59,8 +59,10 @@ beforeEach(() => {
   vi.stubGlobal("indexedDB", new IDBFactory());
   vi.stubGlobal("crypto", webcrypto);
 });
-afterEach(() => {
+afterEach(async () => {
   lockVault();
+  // Finish captured writes before replacing IndexedDB with the next factory.
+  await forgetVault(user.email);
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
