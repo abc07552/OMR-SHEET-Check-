@@ -214,7 +214,7 @@ export default function Backups({
                       workspace,
                       encrypt ? password : undefined,
                     );
-                    downloadFile(
+                    await downloadFile(
                       `markly-${encrypt ? "encrypted-" : ""}backup-${new Date().toISOString().slice(0, 10)}.json`,
                       blob,
                     );
@@ -316,7 +316,7 @@ export default function Backups({
                             { credentials: "include" },
                           );
                           if (!r.ok) throw new Error("Backup download failed.");
-                          downloadFile(
+                          await downloadFile(
                             `markly-server-${s.id}.json`,
                             await r.blob(),
                           );
@@ -385,7 +385,7 @@ export default function Backups({
                   aria-label={`Download recovery point ${s.id}`}
                   onClick={() => {
                     void action("export", async () => {
-                      downloadFile(
+                      await downloadFile(
                         `markly-recovery-${s.id}.json`,
                         await encodeBackup(
                           s.workspace,

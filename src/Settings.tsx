@@ -412,7 +412,7 @@ export default function Settings({
               <p>
                 {cloud
                   ? "Your browser is connected to the shared API. Check Sync & system for the actual backend, database, storage and recovery configuration."
-                  : "GitHub Pages serves the offline app only. Secure logins, PostgreSQL data, and encrypted server backups need the included FastAPI backend on a persistent server."}
+                  : "The static web client and Android APK do not embed a school server. Secure logins, PostgreSQL data, and encrypted server backups need the included FastAPI backend deployed on persistent HTTPS hosting."}
               </p>
               <p className="small muted">
                 Deployment instructions, environment variables, and a Dockerfile

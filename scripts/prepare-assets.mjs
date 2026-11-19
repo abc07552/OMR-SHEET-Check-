@@ -26,6 +26,8 @@ for (const [src, name] of files) {
   copyFileSync(from, resolve(dest, name));
 }
 const notices = [
+  ["Capacitor core · MIT", "@capacitor/core/LICENSE"],
+  ["Capacitor Android · MIT", "@capacitor/android/LICENSE"],
   ["OpenCV.js / TechStark · Apache-2.0", "@techstark/opencv-js/LICENSE"],
   ["Tesseract.js · Apache-2.0", "tesseract.js/LICENSE.md"],
   ["Tesseract.js core · Apache-2.0", "tesseract.js-core/LICENSE"],

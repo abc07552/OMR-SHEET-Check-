@@ -16,6 +16,7 @@ import {
 } from "./session";
 import type { AuthUser } from "./session";
 import * as offline from "./offline";
+import * as native from "./native";
 import {
   cachedSchool,
   enableVault,
@@ -129,6 +130,15 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 describe("session and conflict-aware offline synchronization", () => {
+  it("opens the bundled Android device-only workspace without pretending a school API exists", async () => {
+    vi.spyOn(native, "isBundledAndroid").mockReturnValue(true);
+    const { result } = renderHook(useSession, { wrapper });
+    await waitFor(() => expect(result.current.phase).toBe("local"));
+    expect(result.current.available).toBe(false);
+    expect(result.current.user).toBeNull();
+    expect(result.current.warning).toContain("not account-protected");
+    expect(fetch).not.toHaveBeenCalled();
+  });
   it("never renders a saved badge for a changed workspace before the server acknowledges it", async () => {
     const seen: { teacher: string; status: string }[] = [];
     const { result } = renderHook(

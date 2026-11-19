@@ -18,6 +18,7 @@ import { questionCSV } from "./reportData";
 import { exportExcel, examPDF, studentPDF } from "./documents";
 import { downloadTemplatePDF } from "./omr";
 import ReportCatalogue from "./ReportCatalogue";
+import { printDocument } from "./native";
 interface Props {
   workspace: Workspace;
   exam: Exam;
@@ -62,7 +63,13 @@ export default function Reports({
         actions={
           <button
             className="button button-secondary"
-            onClick={() => window.print()}
+            onClick={() =>
+              void printDocument().catch((error) =>
+                toast(
+                  error instanceof Error ? error.message : "Printing failed.",
+                ),
+              )
+            }
           >
             <Printer size={16} />
             Print full exam report
@@ -161,7 +168,7 @@ export default function Reports({
               "A spreadsheet-friendly export of scores, accuracy, response counts and review status.",
             note: "UTF-8 · formula-safe cells",
             action: async () => {
-              downloadFile(
+              await downloadFile(
                 `markly-results-${exam.id}.csv`,
                 resultsCSV(filtered, exam),
               );
@@ -176,7 +183,7 @@ export default function Reports({
               "Correct-answer percentage, distractor choices, and unanswered counts for every question.",
             note: `A–${exam.optionCount === 5 ? "E" : "D"} response breakdown`,
             action: async () => {
-              downloadFile(
+              await downloadFile(
                 `markly-analysis-${exam.id}.csv`,
                 questionCSV(filtered, exam),
               );

@@ -231,7 +231,7 @@ export default function BatchCenter({
       if (input.current) input.current.value = "";
     }
   };
-  const exportSummary = () => {
+  const exportSummary = async () => {
     const rows = [
       ["Job ID", "Status", "Attempts", "Category", "Error"],
       ...(batch.data?.jobs || []).map((j) => [
@@ -242,7 +242,7 @@ export default function BatchCenter({
         j.error,
       ]),
     ];
-    downloadFile(
+    await downloadFile(
       "omr-batch-summary.csv",
       "\ufeff" +
         rows
@@ -263,7 +263,13 @@ export default function BatchCenter({
           <button
             className="button button-secondary"
             disabled={!batch.data}
-            onClick={exportSummary}
+            onClick={() =>
+              void exportSummary().catch((error) =>
+                toast(
+                  error instanceof Error ? error.message : "Export failed.",
+                ),
+              )
+            }
           >
             <ArrowDownToLine size={15} />
             Download batch summary

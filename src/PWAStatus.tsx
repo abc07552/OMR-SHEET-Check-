@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Download, RefreshCw, X } from "lucide-react";
 import { registerSW } from "virtual:pwa-register";
+import { isBundledAndroid } from "./native";
 interface InstallEvent extends Event {
   prompt: () => Promise<void>;
   userChoice: Promise<{ outcome: string }>;
@@ -11,6 +12,13 @@ export default function PWAStatus() {
     [install, setInstall] = useState<InstallEvent | null>(null),
     [error, setError] = useState("");
   useEffect(() => {
+    // APK assets are already local. A service worker at Capacitor's asset origin
+    // can retain an obsolete shell after an APK update. Hosted HTTPS builds keep
+    // the normal, private-API-excluding PWA flow.
+    if (isBundledAndroid()) {
+      document.documentElement.dataset.offlineShell = "native";
+      return;
+    }
     update = registerSW({
       onNeedRefresh: () => setReady(true),
       onOfflineReady: () => {

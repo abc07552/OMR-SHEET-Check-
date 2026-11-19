@@ -25,7 +25,8 @@ export default function Leaderboard({
 }) {
   const [subject, setSubject] = useState("all"),
     [section, setSection] = useState("all"),
-    [page, setPage] = useState(1);
+    [page, setPage] = useState(1),
+    [exportError, setExportError] = useState("");
   const validSubject =
       subject === "all" ||
       subjectStats(results, exam).some((s) => s.name === subject)
@@ -57,6 +58,10 @@ export default function Leaderboard({
                   ranked.map((r) => r.result),
                   exam,
                 ),
+              ).catch((error) =>
+                setExportError(
+                  error instanceof Error ? error.message : "Export failed.",
+                ),
               )
             }
           >
@@ -65,6 +70,11 @@ export default function Leaderboard({
           </button>
         }
       />
+      {exportError && (
+        <p className="form-error" role="alert">
+          {exportError}
+        </p>
+      )}
       <ExamBar
         workspace={workspace}
         exam={exam}

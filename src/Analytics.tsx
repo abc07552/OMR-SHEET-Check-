@@ -75,11 +75,16 @@ export default function Analytics({
           <button
             className="button button-secondary"
             onClick={() => {
-              downloadFile(
+              void downloadFile(
                 `markly-question-analysis-${exam.id}.csv`,
                 questionCSV(filtered, exam),
-              );
-              toast("Question analysis exported.");
+              )
+                .then(() => toast("Question analysis exported."))
+                .catch((error) =>
+                  toast(
+                    error instanceof Error ? error.message : "Export failed.",
+                  ),
+                );
             }}
           >
             <ArrowDownToLine size={16} />

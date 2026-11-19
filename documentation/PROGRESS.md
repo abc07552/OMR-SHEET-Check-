@@ -101,3 +101,34 @@ Local failure/after logs, benchmark JSON, hash-install reports, advisory results
 - Added seven controlled form regressions and reran them against the pre-fix source: **7 failed → 7 passed**. Extracted `InstitutionDefaults.tsx`, keyed by actor/school: initial-snapshot loading gate, draft-preserving refetch, settings-specific CAS baseline, locked in-flight edits, visible retained conflicts, explicit confirmed discard/reload, acknowledged-cache-before-reload and post-unmount response fencing. Server authorization/CAS remain intact. The original browser persistence assertion was retained and strengthened with a delayed real GET and actual PUT/acknowledgment checks.
 - Full local combined verification: **140 backend tests (78.76 seconds)** with real PostgreSQL parity, **114 frontend / 8 files + 30 Node tests**, Ruff across **40 Python files**, configured Prettier, strict TypeScript and production PWA build all passed. Vite build step: **19.28 seconds**, **51 precache entries / 23,118.81 KiB**. An initial TypeScript check caught test-helper typings; they were corrected without suppressions before rebuilding.
 - Fresh-schema browser run with the loading regression and all genuine native/browser/offline checks passed: **49.5 seconds test / 54.0 seconds overall**, with exact-schema cleanup. Logs are `.cache/qa/accuracy/settings-*` and `institution-form-{before-complete,after}.log`. Latest-head GitHub checks must still verify this combined source; prior green runs are checkpoint-specific.
+
+## Android workflow repair
+
+The screenshot's original Android run
+[44444843181](https://github.com/abc07552/OMR-SHEET-Check-/actions/runs/44444843181)
+failed at root-level `chmod +x gradlew`: the repository contained neither that
+wrapper nor an Android project. Its later `disabled_manually` workflow state is a
+separate administrative state, with no evidenced attribution.
+
+Implemented a real pinned Capacitor 8.6.2 project, Gradle wrapper with distribution
+checksum, SDK 36/JDK 21 CI, web synchronization, native JVM/lint/build checks and
+verified APK/checksum upload. Default APK behavior is an explicitly unprotected
+device-only demo; a public, validated HTTPS origin can select a separately
+deployed school app with same-origin cookies/API. No backend hosting or signing
+secret is invented. Added Android runtime-camera declaration, restricted capture
+FileProvider, disabled automatic backup/cleartext/debug bridge logging, Save As
+and print bridges, awaited export failures, and native-versus-hosted PWA guards.
+
+Local verification: **150 frontend tests / 11 files and 30 preserved Node tests
+passed**, along with TypeScript, formatting and npm audit (0 advisories).
+The production Android web bundle and Capacitor synchronization also passed.
+These checks are executed independently of the native compiler. Native compilation
+requires JDK 21/SDK 36, unavailable in the restricted local sandbox; consult
+**Build Android APK** for the actual exact-commit build outcome and artifact, not
+the earlier web checks. Hardware/emulator acceptance, release signing and hosted
+school deployment remain separate gates. Full instructions and constraints are
+in [ANDROID.md](ANDROID.md), with test contracts in [TESTING.md](TESTING.md).
+
+Until this branch is merged, the default branch still has the old build steps.
+Re-enabling a workflow does not rewrite that old revision; run the fixed branch
+in Actions and review this same existing draft PR before changing `main`.

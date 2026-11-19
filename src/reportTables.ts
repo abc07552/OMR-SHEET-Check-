@@ -173,7 +173,7 @@ export async function downloadTable(
 ) {
   const safe = rows.map((r) => r.map(safeCell));
   if (format === "csv") {
-    downloadFile(
+    await downloadFile(
       filename + ".csv",
       "\ufeff" +
         safe
@@ -201,7 +201,7 @@ export async function downloadTable(
     sheet.columns.forEach((c) => {
       c.width = 22;
     });
-    downloadFile(
+    await downloadFile(
       filename + ".xlsx",
       new Blob([(await book.xlsx.writeBuffer()) as BlobPart]),
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -255,5 +255,5 @@ export async function downloadTable(
       );
     },
   });
-  doc.save(filename + ".pdf");
+  await downloadFile(filename + ".pdf", doc.output("blob"));
 }

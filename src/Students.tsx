@@ -103,13 +103,20 @@ export default function Students({
     safePage * pageSize,
   );
   const stats = getStats(results, exam);
-  const exportFiltered = () => {
+  const exportFiltered = async () => {
     const items = selected.size
       ? filtered.filter((r) => selected.has(r.id))
       : filtered;
     if (!items.length) return;
-    downloadFile(`markly-students-${exam.id}.csv`, resultsCSV(items, exam));
-    toast(`${items.length} student results exported to CSV.`);
+    try {
+      await downloadFile(
+        `markly-students-${exam.id}.csv`,
+        resultsCSV(items, exam),
+      );
+      toast(`${items.length} student results exported to CSV.`);
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "Export failed.");
+    }
   };
   const reset = () => {
     setSearch("");
@@ -781,11 +788,16 @@ export function StudentDetail({
         <button
           className="button button-secondary"
           onClick={() => {
-            downloadFile(
+            void downloadFile(
               `markly-${result.roll}-result.csv`,
               resultsCSV([result], exam),
-            );
-            toast("Student result exported.");
+            )
+              .then(() => toast("Student result exported."))
+              .catch((error) =>
+                toast(
+                  error instanceof Error ? error.message : "Export failed.",
+                ),
+              );
           }}
         >
           <ArrowDownToLine size={15} />

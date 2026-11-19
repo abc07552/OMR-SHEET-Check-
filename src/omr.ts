@@ -1,5 +1,5 @@
 import QRCode from "qrcode";
-import { OPTIONS, getOptions } from "./data";
+import { OPTIONS, getOptions, downloadFile } from "./data";
 import type { AnswerDetection, Exam, Option } from "./data";
 import {
   DEFAULT_ANCHORS,
@@ -284,12 +284,17 @@ export async function createSheet(
   return canvas;
 }
 export async function downloadTemplate(exam: Exam, page = 0) {
-  const a = document.createElement("a");
-  a.download = `markly-${exam.id}-page-${page + 1}.png`;
-  a.href = (await createSheet(exam, undefined, "", "", page)).toDataURL(
-    "image/png",
-  );
-  a.click();
+  const canvas = await createSheet(exam, undefined, "", "", page);
+  const blob = await new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob(
+      (value) =>
+        value
+          ? resolve(value)
+          : reject(new Error("The sheet image could not be created.")),
+      "image/png",
+    );
+  });
+  await downloadFile(`markly-${exam.id}-page-${page + 1}.png`, blob);
 }
 export async function templatePDF(
   exam: Exam,
@@ -325,7 +330,10 @@ export async function downloadTemplatePDF(
   student?: { name: string; roll: string },
 ) {
   const doc = await templatePDF(exam, student);
-  doc.save(`markly-omr-${exam.id}${student ? `-${student.roll}` : ""}.pdf`);
+  await downloadFile(
+    `markly-omr-${exam.id}${student ? `-${student.roll}` : ""}.pdf`,
+    doc.output("blob"),
+  );
 }
 interface Point {
   x: number;

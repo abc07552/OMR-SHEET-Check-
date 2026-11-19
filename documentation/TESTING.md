@@ -134,3 +134,31 @@ Current **executed** results, caveats and open deployment/device acceptance work
 ### Inspecting a restricted CI failure
 
 Playwright emits structured GitHub failure annotations in Actions as well as retaining traces; retries remain disabled. If a sandbox cannot reach the signed archive host, an operator can dispatch the existing verification workflow with `diagnose_run` set to a failed run number. This read-only diagnostic path accepts only failed runs of the **same synthetic workflow and branch**, emits compact, size-bounded failure-log/context annotations, and runs in a separate concurrency group. A follow-up context step inspects only the synthetic artifact and selected settings request/result fields; it does not expose session headers, cookies, logos or object URLs. Leave the input empty for normal full verification. It neither reruns nor marks the original failed check as passed. Never use this synthetic-data workflow for real student sessions.
+
+## Android build and native-bridge regressions
+
+See [ANDROID.md](ANDROID.md) for the corrected workflow, exact native toolchain,
+configuration, download and physical-device acceptance checklist.
+
+- `src/native.test.tsx`: browser download URL lifecycle; exact native binary/MIME
+  payload; completion only after the native writer resolves; cancelled/failed
+  saves without fake browser fallback; filename safety; bounded allocation;
+  visible encoding failure; platform-specific printing.
+- `src/android-config.test.ts`: default demo versus trusted same-origin HTTPS
+  deployment; invalid/credential-bearing/localhost/wildcard URL refusal; camera,
+  backup, transport and narrowly scoped FileProvider permission guards.
+- `src/session.test.tsx`: the bundled APK opens an explicitly unprotected local
+  demo without trying to authenticate against an imaginary `/api`.
+- `src/PWAStatus.test.tsx`: bundled assets avoid stale PWA registration; hosted
+  clients retain actual cache readiness and visible registration errors.
+- Native `ExportPolicyTest`: real JVM filename/MIME/base64 size validation.
+  `.github/workflows/main.yml` builds web assets, synchronizes Capacitor, runs
+  `testDebugUnitTest lintDebug assembleDebug` inside `android/`, then checks the
+  APK signature, launchable activity, package and API levels before upload.
+
+The original failing run is the reproduced missing-project/wrapper failure, not
+a compiler result. Local web/bridge tests are not a native APK compilation. Use
+the successful Actions run's exact commit and downloadable artifact as native
+build evidence. `connectedDebugAndroidTest` and hardware camera/file-picker/print/
+hosted-cookie acceptance require an actual device or emulator and are not counted
+as passing simply because a workflow file or instrumented test exists.

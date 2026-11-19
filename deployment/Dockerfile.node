@@ -4,7 +4,7 @@ FROM node:24-bookworm-slim AS builder
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
-COPY index.html vite.config.ts tsconfig*.json ./
+COPY index.html vite.config.ts capacitor.config.ts tsconfig*.json ./
 COPY public ./public
 COPY src ./src
 COPY scripts ./scripts

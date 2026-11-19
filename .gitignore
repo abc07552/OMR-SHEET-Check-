@@ -26,3 +26,9 @@ __pycache__/
 .coverage
 htmlcov/
 *.egg-info/
+
+# Android web bundles and downloadable build artifacts (native sources are tracked)
+/dist-android/
+/artifacts/
+*.jks
+*.keystore

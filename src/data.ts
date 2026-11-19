@@ -601,19 +601,7 @@ export function formatDate(date: string) {
     year: "numeric",
   });
 }
-export function downloadFile(
-  name: string,
-  data: string | Blob,
-  type = "text/csv;charset=utf-8",
-) {
-  const blob = typeof data === "string" ? new Blob([data], { type }) : data;
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = name;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
+export { downloadFile } from "./downloads";
 export function resultsCSV(results: Result[], exam: Exam) {
   const escape = (v: unknown) => {
     const text = String(v);

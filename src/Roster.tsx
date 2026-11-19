@@ -181,7 +181,16 @@ export default function Roster(props: Props) {
               </strong>{" "}
               active classes
             </span>
-            <button className="text-link" onClick={studentImportTemplate}>
+            <button
+              className="text-link"
+              onClick={() =>
+                void studentImportTemplate().catch((error) =>
+                  toast(
+                    error instanceof Error ? error.message : "Export failed.",
+                  ),
+                )
+              }
+            >
               <ArrowDownToLine size={14} />
               Import template
             </button>

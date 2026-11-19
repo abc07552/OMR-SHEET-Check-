@@ -122,10 +122,12 @@ export default function SystemCenter({
             <div>
               <dt>Offline application shell</dt>
               <dd>
-                {document.documentElement.dataset.offlineShell === "ready" ||
-                navigator.serviceWorker?.controller
-                  ? "Cached public app assets · private APIs excluded"
-                  : "Not cached yet / unavailable in development"}
+                {document.documentElement.dataset.offlineShell === "native"
+                  ? "Bundled APK assets · no service worker required"
+                  : document.documentElement.dataset.offlineShell === "ready" ||
+                      navigator.serviceWorker?.controller
+                    ? "Cached public app assets · private APIs excluded"
+                    : "Not cached yet / unavailable in development"}
               </dd>
             </div>
             <div>
@@ -396,6 +398,10 @@ export default function SystemCenter({
                     "omr-unsaved-workspace.json",
                     JSON.stringify(workspace),
                     "application/json",
+                  ).catch((error) =>
+                    toast(
+                      error instanceof Error ? error.message : "Export failed.",
+                    ),
                   )
                 }
               >

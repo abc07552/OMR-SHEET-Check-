@@ -443,7 +443,7 @@ export default function StudentImport({
                       ["Row", "Roll", "Error"],
                       ...preview.issues.map((e) => [e.row, e.roll, e.error]),
                     ];
-                    downloadFile(
+                    void downloadFile(
                       "student-import-invalid-rows.csv",
                       "\ufeff" +
                         rows
@@ -457,6 +457,12 @@ export default function StudentImport({
                           )
                           .join("\r\n"),
                       "text/csv",
+                    ).catch((error) =>
+                      setError(
+                        error instanceof Error
+                          ? error.message
+                          : "Export failed.",
+                      ),
                     );
                   }}
                 >

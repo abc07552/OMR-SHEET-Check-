@@ -328,9 +328,16 @@ function WorkspaceApp() {
     navigate("keys");
     toast("Your new assessment is ready. Add the correct answers to begin.");
   };
-  const exportResults = () => {
-    downloadFile(`markly-results-${exam.id}.csv`, resultsCSV(results, exam));
-    toast(`${results.length} result records exported.`);
+  const exportResults = async () => {
+    try {
+      await downloadFile(
+        `markly-results-${exam.id}.csv`,
+        resultsCSV(results, exam),
+      );
+      toast(`${results.length} result records exported.`);
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "Export failed.");
+    }
   };
   const switchSchool = (id: string) => {
     if (scanBusy || status === "saving" || status === "queued") {
@@ -862,6 +869,12 @@ function WorkspaceApp() {
                       "markly-unsaved-workspace.json",
                       JSON.stringify(full),
                       "application/json",
+                    ).catch((error) =>
+                      toast(
+                        error instanceof Error
+                          ? error.message
+                          : "Export failed.",
+                      ),
                     )
                   }
                 >

@@ -25,3 +25,10 @@ htmlcov
 playwright-report
 test-results
 e2e
+
+# Native projects/bundles are built by their own workflow, never the web image
+android
+dist-android
+artifacts
+*.jks
+*.keystore

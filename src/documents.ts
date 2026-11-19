@@ -133,7 +133,7 @@ export async function exportExcel(
       to: { row: s.rowCount, column: s.columnCount },
     };
   });
-  downloadFile(
+  await downloadFile(
     `markly-${exam.id}.xlsx`,
     new Blob([(await book.xlsx.writeBuffer()) as BlobPart], {
       type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -255,8 +255,8 @@ export async function importStudents(
   });
   return { students, errors };
 }
-export function studentImportTemplate() {
-  downloadFile(
+export async function studentImportTemplate() {
+  await downloadFile(
     "markly-student-import.csv",
     "Name,Roll number,Class,Email,Phone,Guardian\r\nMaya Verma,13001,12 A,,,\r\nNeel Bose,13002,12 B,,,",
   );
@@ -414,7 +414,10 @@ export async function studentPDF(
       289,
     );
   }
-  doc.save(`markly-report-${result.roll.replace(/[^a-z0-9_-]/gi, "_")}.pdf`);
+  await downloadFile(
+    `markly-report-${result.roll.replace(/[^a-z0-9_-]/gi, "_")}.pdf`,
+    doc.output("blob"),
+  );
 }
 export async function examPDF(
   workspace: Workspace,
@@ -469,5 +472,5 @@ export async function examPDF(
     headStyles: { fillColor: [47, 76, 56] },
     margin: { left: 15, right: 15 },
   });
-  doc.save(`markly-exam-${exam.id}.pdf`);
+  await downloadFile(`markly-exam-${exam.id}.pdf`, doc.output("blob"));
 }

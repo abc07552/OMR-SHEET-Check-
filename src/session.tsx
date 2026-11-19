@@ -22,6 +22,7 @@ import {
 } from "./offline";
 import type { PendingOperation } from "./offline";
 import { queryClient } from "./query";
+import { isBundledAndroid } from "./native";
 
 export interface Membership {
   schoolId: string;
@@ -94,7 +95,7 @@ export async function apiDownload(path: string, filename: string) {
       response.status,
     );
   }
-  downloadFile(filename, await response.blob());
+  await downloadFile(filename, await response.blob());
 }
 interface Session {
   phase: "checking" | "login" | "setup" | "local" | "authenticated";
@@ -133,6 +134,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     revoking = useRef<Promise<boolean> | null>(null);
   currentUser.current = user;
   useEffect(() => {
+    if (isBundledAndroid()) {
+      setPhase("local");
+      setWarning(
+        "Android device-only demo: no school server is configured. This workspace is not account-protected; do not enter private student data here.",
+      );
+      return;
+    }
     let alive = true;
     const controller = new AbortController(),
       timeout = setTimeout(() => controller.abort(), 8000);

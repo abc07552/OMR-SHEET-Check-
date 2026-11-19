@@ -178,7 +178,7 @@ export default function StudentPortal() {
           styles: { font: doc.getFont().fontName, fontSize: 8 },
           headStyles: { fillColor: [27, 58, 110] },
         });
-        doc.save("my-report-card.pdf");
+        await downloadFile("my-report-card.pdf", doc.output("blob"));
       } else {
         const rows = [
           ["Question", "Selected", "Correct", "Status", "Marks"],
@@ -196,12 +196,12 @@ export default function StudentPortal() {
           const sheet = book.addWorksheet("My result");
           sheet.addRows(rows);
           sheet.getRow(1).font = { bold: true };
-          downloadFile(
+          await downloadFile(
             "my-report-card.xlsx",
             new Blob([(await book.xlsx.writeBuffer()) as BlobPart]),
           );
         } else
-          downloadFile(
+          await downloadFile(
             "my-report-card.csv",
             "\ufeff" +
               rows

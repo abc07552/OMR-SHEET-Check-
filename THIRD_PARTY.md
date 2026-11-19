@@ -5,6 +5,7 @@ Markly depends on the packages recorded in `package-lock.json`. Their respective
 | Component                            | Purpose                                    | License                                                        |
 | ------------------------------------ | ------------------------------------------ | -------------------------------------------------------------- |
 | React, React DOM                     | Interface                                  | MIT                                                            |
+| Capacitor core / Android / CLI       | Native Android shell and build bridge      | MIT                                                            |
 | Vite, Vitest, TypeScript             | Build/test tooling                         | MIT / Apache-2.0 (TypeScript)                                  |
 | Lucide                               | Interface icons                            | ISC                                                            |
 | Recharts / D3                        | Charts                                     | MIT / ISC (individual D3 modules)                              |
@@ -22,6 +23,6 @@ Markly depends on the packages recorded in `package-lock.json`. Their respective
 | DM Sans via Fontsource               | UI typography                              | SIL Open Font License 1.1                                      |
 | Noto Sans                            | Embedded PDF typography                    | SIL Open Font License 1.1                                      |
 
-The asset-preparation script copies the available OpenCV/Tesseract/PDF.js/jsQR license notices into `public/vendor/LICENSES.txt`, which is shipped with the built site. Noto Sans is accompanied by `public/fonts/OFL.txt`. See the packages' own `LICENSE` files for the remaining notices and transitive components.
+The asset-preparation script copies the available Capacitor/OpenCV/Tesseract/PDF.js/jsQR license notices into `public/vendor/LICENSES.txt`, which is shipped with the built site. Noto Sans is accompanied by `public/fonts/OFL.txt`. See the packages' own `LICENSE` files for the remaining notices and transitive components.
 
 The English model is sourced from `@tesseract.js-data/eng/4.0.0_best_int/eng.traineddata.gz`; OCR assets are served locally, not fetched from a public CDN at runtime. OpenCV.js is shipped as an on-demand local asset. No remote recognition service receives uploaded answer sheets.

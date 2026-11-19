@@ -4,6 +4,16 @@ This guide deploys the **FastAPI/PostgreSQL** application. It does not deploy an
 
 The default `Dockerfile` now builds the React application and a non-root CPython 3.11/FastAPI runtime. `deployment/Dockerfile.node` preserves the former Node/SQLite packaging; `npm run server` remains available for the baseline. **Never mount `markly.sqlite` as an enterprise SQLAlchemy database.** Read [MIGRATION.md](MIGRATION.md) before cutover.
 
+## Android is a client, not backend hosting
+
+The optional native project and `Build Android APK` workflow are documented in
+[ANDROID.md](ANDROID.md). They do not package Python/PostgreSQL or provision this
+deployment. The default APK is a labelled device-only demo. For school accounts,
+deploy the complete updated client + `/api` on this guide's same HTTPS origin,
+then set the public Android build origin. Do not weaken cookies/CORS or embed
+server secrets to work around a missing deployment. Debug APKs are test builds,
+not a production mobile release or physical-device certification.
+
 ## Supported configuration
 
 - Node 24 builds the client; Python 3.11 uses `backend/requirements.lock` at runtime with `--require-hashes --only-binary=:all:`. Both runtime and development closures include pinned versions and published non-yanked PyPI SHA-256 artifact hashes. The locks were installed in a clean Linux x86-64 CPython 3.11 environment; validate a different platform's installation separately. Node/npm development dependencies and development-only Bandit are not installed into the Python runtime.
