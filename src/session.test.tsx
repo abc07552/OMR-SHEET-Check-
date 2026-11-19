@@ -702,3 +702,24 @@ describe("session and conflict-aware offline synchronization", () => {
     expect(result.current.user).toBeNull();
   });
 });
+
+it("does not strand an expired/revoked logout cookie in an endless offline login loop", async () => {
+  const { result } = renderHook(useSession, { wrapper });
+  await waitFor(() => expect(result.current.phase).toBe("authenticated"));
+  const original = vi.mocked(fetch).getMockImplementation()!;
+  vi.mocked(fetch).mockImplementation(async (input, init) =>
+    String(input).endsWith("/auth/logout")
+      ? json({ error: "Already revoked" }, 401)
+      : original(input, init),
+  );
+  await act(async () => {
+    await result.current.logout();
+  });
+  expect(result.current.phase).toBe("login");
+  expect(localStorage.getItem("omr-revoke-on-reconnect")).toBeNull();
+  await act(async () => {
+    await result.current.login(user.email, "correct-login-password");
+  });
+  expect(result.current.phase).toBe("authenticated");
+  expect(result.current.offline).toBe(false);
+});

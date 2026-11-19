@@ -17,7 +17,7 @@ python3.11 -m venv .venv
 # Development/local fallback creates a SEPARATE .data/enterprise.sqlite.
 # Prefer a dedicated PostgreSQL database for shared use:
 # export DATABASE_URL='postgresql+psycopg://user:password@host/database'
-.venv/bin/uvicorn backend.main:create_app --factory --host 0.0.0.0 --port 8000
+.venv/bin/uvicorn backend.main:create_app --factory --no-access-log --host 0.0.0.0 --port 8000
 ```
 
 Open port 8000. FastAPI serves the built React application and `/api` on the same origin. First-run setup creates your own administrator; there are no default credentials. `/api/docs` describes the API. A separate device demo is explicitly labeled and is not authenticated school data.
@@ -52,6 +52,28 @@ npm ci
 npm run android:debug  # requires JDK 21 and Android SDK 36 locally
 # android/app/build/outputs/apk/debug/app-debug.apk
 ```
+
+## Signup, Google login and Drive
+
+The FastAPI portal supports email/password signup, verified production email,
+Google sign-in/sign-up and password-confirmed Google linking. New signups create
+**isolated school-admin workspaces, never super-admin or existing-school access**.
+Public registration is operator-controlled (`PUBLIC_SIGNUP_ENABLED`, default
+false); school administrators continue to create teacher/student memberships.
+Google-only users can set an app password in **Settings → Sign-in & security**.
+
+**Backups → Google Drive backups** separately authorizes a private Drive app-data
+folder for manual, encrypted workspace backups, safe retries, verified downloads
+and non-destructive import followed by password/revision-confirmed restore. It is
+not scheduled replication or a full database/original-image disaster-recovery
+backup. Google Cloud OAuth credentials, Drive API, a canonical HTTPS app domain,
+and SMTP for production password signup must be configured **on your server**.
+There are no embedded Google secrets or invented connected accounts. Android
+Google consent opens in the external browser, not an embedded WebView.
+
+See the [complete configuration, usage and verification guide](documentation/GOOGLE_AUTH_DRIVE.md).
+Live Google/SMTP authorization and real Android callback acceptance still need
+your configured project, domain and authorized test users.
 
 ## Working capabilities
 

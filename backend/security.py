@@ -70,10 +70,18 @@ def current_user(request: Request, db: DBSession = Depends(db_session)):
     return user
 
 
-def issue_session(db, response: Response, user, settings):
+def issue_session(db, response: Response, user, settings, method="password"):
     token = secrets.token_urlsafe(32)
     db.execute(delete(m.Session).where(m.Session.expires_at < m.now()))
-    db.add(m.Session(token_hash=digest(token), user_id=user.id, expires_at=m.now() + timedelta(hours=24)))
+    db.add(
+        m.Session(
+            token_hash=digest(token),
+            user_id=user.id,
+            expires_at=m.now() + timedelta(hours=24),
+            auth_method=method,
+            created_at=m.now(),
+        )
+    )
     response.set_cookie(
         COOKIE,
         token,

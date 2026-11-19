@@ -36,7 +36,7 @@ async function navigate(page: Page, route: string) {
 async function login(page: Page, email: string, password: string) {
   await page.goto("/");
   await page.getByLabel("Email address", { exact: true }).fill(email);
-  await page.getByLabel("Password", { exact: true }).fill(password);
+  await page.getByLabel("App password", { exact: true }).fill(password);
   await page
     .getByRole("button", { name: "Sign in to your workspace", exact: true })
     .click();
@@ -103,7 +103,12 @@ test("genuine enterprise workflows, restricted portals, reports and encrypted of
       .getByLabel("School or institution", { exact: true })
       .fill("Optical QA Academy");
     await page.getByLabel("Email address", { exact: true }).fill(email);
-    await page.getByLabel("Create a password", { exact: true }).fill(password);
+    await page
+      .getByLabel("Create an app password", { exact: true })
+      .fill(password);
+    await page
+      .getByLabel("Confirm app password", { exact: true })
+      .fill(password);
     await page
       .getByRole("button", { name: "Create secure workspace", exact: true })
       .click();
@@ -782,4 +787,134 @@ image[380:1500,100:1150]=255
         !/net::ERR_INTERNET_DISCONNECTED|status of 401/.test(message),
     ),
   ).toEqual([]);
+});
+
+test("real password registration portal creates an isolated school and supports security and backup configuration", async ({
+  page,
+}, info) => {
+  const password = `QA-new-${randomUUID()}`,
+    updated = `QA-updated-${randomUUID()}`,
+    email = `signup-${randomUUID()}@school.edu`,
+    errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.setViewportSize({ width: 390, height: 960 });
+  await page.goto("/");
+  await expect(
+    page.getByRole("button", { name: "Sign in with Google", exact: true }),
+  ).toBeDisabled();
+  await page
+    .getByRole("button", { name: "Create institution", exact: true })
+    .click();
+  for (const theme of ["dark", "light"]) {
+    await page.evaluate((value) => {
+      document.documentElement.dataset.theme = value;
+      document.documentElement.style.colorScheme = value;
+    }, theme);
+    for (const width of [390, 1440]) {
+      await page.setViewportSize({ width, height: 960 });
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth + 1,
+        ),
+        `signup portal ${theme} ${width}`,
+      ).toBe(true);
+      await page.screenshot({
+        path: info.outputPath(`signup-${theme}-${width}.png`),
+        fullPage: true,
+      });
+    }
+  }
+  await page.setViewportSize({ width: 390, height: 960 });
+  await page
+    .getByLabel("Your name", { exact: true })
+    .fill("Signup QA Administrator");
+  await page
+    .getByLabel("School or institution", { exact: true })
+    .fill("Independent Signup QA");
+  await page.getByLabel("Email address", { exact: true }).fill(email);
+  await page
+    .getByLabel("Create an app password", { exact: true })
+    .fill(password);
+  await page
+    .getByLabel("Confirm app password", { exact: true })
+    .fill("mismatched-passphrase");
+  await page
+    .getByRole("button", { name: "Create account with email", exact: true })
+    .click();
+  await expect(page.getByRole("alert")).toContainText("Passwords must match");
+  await page.getByLabel("Confirm app password", { exact: true }).fill(password);
+  await page
+    .getByRole("button", { name: "Create account with email", exact: true })
+    .click();
+  await expect(page.locator(".app-shell")).toBeVisible();
+  const user = (await api(page.request, "/auth/me")).user;
+  expect(user.owner).toBe(false);
+  expect(user.memberships).toHaveLength(1);
+  expect(user.memberships[0].role).toBe("admin");
+  const school = user.memberships[0].schoolId;
+  const records = await api(page.request, `/schools/${school}/workspace`);
+  expect(records.workspace.students).toHaveLength(0);
+  expect(records.workspace.results).toHaveLength(0);
+  await navigate(page, "settings");
+  await expect(
+    page.getByRole("heading", { name: "Sign-in & security", exact: true }),
+  ).toBeVisible();
+  await page.screenshot({
+    path: info.outputPath("signup-account-security.png"),
+    fullPage: true,
+  });
+  await page.getByLabel("Current app password", { exact: true }).fill(password);
+  await page.getByLabel("New app password", { exact: true }).fill(updated);
+  await page
+    .getByLabel("Confirm new app password", { exact: true })
+    .fill(updated);
+  await page
+    .getByRole("button", { name: "Change password & sign out", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", {
+      name: "Sign in to your workspace",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await login(page, email, updated);
+  await expect(page.locator(".app-shell")).toBeVisible();
+  await navigate(page, "backups");
+  const drive = page.getByRole("region", {
+    name: "Google Drive backups",
+    exact: true,
+  });
+  await expect(
+    drive.getByText("No Google Drive connected", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    drive.getByRole("button", { name: "Connect Google Drive", exact: true }),
+  ).toBeDisabled();
+  await expect(
+    drive.getByText(/hosting operator must configure Google Cloud/),
+  ).toBeVisible();
+  for (const theme of ["dark", "light"]) {
+    await page.evaluate((value) => {
+      document.documentElement.dataset.theme = value;
+      document.documentElement.style.colorScheme = value;
+    }, theme);
+    for (const width of [390, 768, 1440]) {
+      await page.setViewportSize({ width, height: 960 });
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth + 1,
+        ),
+        `signup backup ${theme} ${width}`,
+      ).toBe(true);
+      await page.screenshot({
+        path: info.outputPath(`drive-${theme}-${width}.png`),
+        fullPage: true,
+      });
+    }
+  }
+  await page.screenshot({
+    path: info.outputPath("signup-drive-backups.png"),
+    fullPage: true,
+  });
+  expect(errors).toEqual([]);
 });

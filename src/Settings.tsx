@@ -1,4 +1,5 @@
 import { useState } from "react";
+import AccountSecurity from "./AccountSecurity";
 import {
   ArrowRight,
   BookOpen,
@@ -39,10 +40,7 @@ export default function Settings({
     [newSchool, setNewSchool] = useState(false),
     [className, setClassName] = useState(""),
     [year, setYear] = useState("2026–27"),
-    [editing, setEditing] = useState<ClassRoom | null>(null),
-    [current, setCurrent] = useState(""),
-    [password, setPassword] = useState(""),
-    [busy, setBusy] = useState(false);
+    [editing, setEditing] = useState<ClassRoom | null>(null);
   const addClass = () => {
     if (!className.trim() || !year.trim()) return;
     if (
@@ -276,76 +274,12 @@ export default function Settings({
               </div>
             </form>
           </section>
-          {cloud && (
-            <section className="card">
-              <div className="card-heading">
-                <div>
-                  <h2>
-                    <KeyRound size={17} />
-                    Change your password
-                  </h2>
-                  <p>Changing it signs out all other sessions.</p>
-                </div>
-              </div>
-              <form
-                onSubmit={async (e) => {
-                  e.preventDefault();
-                  setBusy(true);
-                  try {
-                    await api("/auth/password", {
-                      method: "POST",
-                      body: JSON.stringify({
-                        currentPassword: current,
-                        password,
-                      }),
-                    });
-                    setPassword("");
-                    setCurrent("");
-                    toast(
-                      "Your password has been changed. Other sessions have been signed out.",
-                    );
-                  } catch (e) {
-                    toast(
-                      e instanceof Error
-                        ? e.message
-                        : "Password change failed.",
-                    );
-                  } finally {
-                    setBusy(false);
-                  }
-                }}
-              >
-                <div className="form-fields">
-                  <label>
-                    Current password
-                    <input
-                      type="password"
-                      required
-                      autoComplete="current-password"
-                      value={current}
-                      onChange={(e) => setCurrent(e.target.value)}
-                    />
-                  </label>
-                  <label>
-                    New password
-                    <input
-                      type="password"
-                      required
-                      autoComplete="new-password"
-                      minLength={12}
-                      maxLength={128}
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                    />
-                  </label>
-                  <button className="button button-secondary" disabled={busy}>
-                    <KeyRound size={15} />
-                    Update password
-                  </button>
-                </div>
-              </form>
-            </section>
-          )}
+          {cloud &&
+            (session.backend === "fastapi" ? (
+              <AccountSecurity />
+            ) : (
+              <LegacyPassword onMessage={toast} />
+            ))}
         </div>
         <aside>
           <section className="card">
@@ -535,5 +469,72 @@ function NewSchoolModal({
         </div>
       </form>
     </Modal>
+  );
+}
+
+// Preserve password management for the optional legacy Node service.
+function LegacyPassword({
+  onMessage,
+}: {
+  onMessage: (message: string) => void;
+}) {
+  const session = useSession();
+  const [currentPassword, setCurrent] = useState(""),
+    [password, setPassword] = useState(""),
+    [busy, setBusy] = useState(false);
+  return (
+    <section className="card">
+      <div className="card-heading">
+        <h2>Change your password</h2>
+      </div>
+      <form
+        className="form-fields"
+        onSubmit={async (e) => {
+          e.preventDefault();
+          setBusy(true);
+          try {
+            await api("/auth/password", {
+              method: "POST",
+              body: JSON.stringify({ currentPassword, password }),
+            });
+            await session.logout();
+          } catch (e) {
+            onMessage(
+              e instanceof Error ? e.message : "Password change failed.",
+            );
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        <label>
+          Current password
+          <input
+            type="password"
+            required
+            autoComplete="current-password"
+            maxLength={128}
+            value={currentPassword}
+            onChange={(e) => setCurrent(e.target.value)}
+          />
+        </label>
+        <label>
+          New password
+          <input
+            type="password"
+            required
+            autoComplete="new-password"
+            minLength={12}
+            maxLength={128}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+        </label>
+        <button className="button button-secondary" disabled={busy}>
+          <KeyRound size={15} />
+          Change password & sign out
+        </button>
+      </form>
+    </section>
   );
 }

@@ -68,7 +68,8 @@ import Dashboard from "./Dashboard";
 import AnswerKeys, { NewExamModal } from "./AnswerKeys";
 import { StudentDetail } from "./Students";
 import PrintReport from "./PrintReport";
-import ResetAccount from "./AccountAccess";
+import ResetAccount, { VerifyEmail } from "./AccountAccess";
+import GoogleReturn, { GoogleNativeBridge } from "./GoogleReturn";
 import ServerConnection from "./ServerConnection";
 const Scanner = lazy(() => import("./Scanner")),
   Roster = lazy(() => import("./Roster")),
@@ -116,6 +117,7 @@ export default function App() {
   const session = useSession();
   return (
     <>
+      <GoogleNativeBridge />
       <AppContent />
       {session.connectionOpen && <ServerConnection />}
     </>
@@ -124,6 +126,8 @@ export default function App() {
 function AppContent() {
   const session = useSession(),
     route = useLocation();
+  if (route.pathname === "/oauth/return") return <GoogleReturn />;
+  if (route.pathname === "/verify-email") return <VerifyEmail />;
   if (route.pathname === "/reset")
     return (
       <Suspense
@@ -1056,6 +1060,7 @@ function WorkspaceApp() {
               )}
               {page === "backups" && allowedPage("backups") && (
                 <Backups
+                  key={schoolId}
                   workspace={cloud ? workspace : full}
                   onRestore={(data) => setWorkspace(enrichWorkspace(data))}
                   reload={store.reload}

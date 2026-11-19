@@ -228,3 +228,95 @@ Android policy execution, lint, assembly and signature are gated by a fresh curr
 branch workflow, not inferred from these local runs. Six actual browser
 viewport/theme connection checks also passed without horizontal overflow or page
 errors and refused unsafe HTTP navigation; no preview administrator was created.
+
+## Google login/signup, password portal and Drive backup continuation
+
+Implemented on the current Arena branch following the delivered HTTPS pairing
+checkpoint `7b02c1b`:
+
+- FastAPI sign-in/create-institution portal; confirmed 12–128-character app
+  passwords; production email verification requiring a one-use token **and the
+  chosen password**; safe pending-signup resend; verified SMTP TLS; recovery and
+  password management for existing / Google-only users. Public signup remains
+  opt-in (`PUBLIC_SIGNUP_ENABLED=false`), after protected super-admin setup, and
+  creates a new isolated regular-school-admin workspace, never existing-school
+  access or super-admin privileges.
+- Google Authorization Code + S256 PKCE + nonce; official signed ID-token
+  verifier; Google sign-in/signup; password-confirmed explicit linking/unlinking;
+  no email-only auto-link; recent-Google first-password setting; encrypted,
+  expiring, one-use cookie/device-proof-bound completion. Provider tokens/secrets
+  stay on the server. Existing session/password data survives additive migration
+  `a37e42b5f901`; new schema/ORM parity is verified on both database engines.
+- Android external Custom Tab consent, App plugin warm/cold return handling and
+  exact package/path checking; independent device S256 proof; per-origin pending
+  handoff; cancellation on auth/server departure. App 8.1.2 / Browser 8.0.5 plugins
+  were synchronized locally. Android CI now checks the **compiled** callback
+  scheme/host/path and plugin registrations as well as JVM/lint/signature gates.
+  Missing proof after process death fails closed; real phone lifecycle acceptance
+  is not inferred from JavaScript plugin-shaped tests or a build.
+- Manual, private `drive.appdata` consent per administrator/school, encrypted
+  access/refresh credentials, coherent encrypted workspace snapshots, durable
+  operation IDs / remote file IDs / three-minute leases, safe ambiguous-upload
+  retry, remote size/metadata/hash checks, history/download/non-destructive import
+  and disconnect even when Google or the encryption key is unavailable. Actual
+  restore remains app-password + revision + tenant bound with pre-restore safety.
+  These backups exclude accounts, original binaries, keys and full database
+  history; clock-driven scheduling and full DR remain separate release gates.
+- Settings / student Profile sign-in security and admin Backups integration,
+  light/dark mobile/desktop portal; unconfigured services clearly disabled with
+  operator guidance rather than fake connected states. Server-only environment /
+  Compose settings, external-query log-redaction guidance, plugin license notices
+  and [complete operator guide](GOOGLE_AUTH_DRIVE.md) are included.
+
+### Reproductions and fixes
+
+1. The first real signup browser test exposed a false-offline login loop after a
+   successful password change revoked the cookie. Logout is now idempotent even
+   with an expired/revoked/missing cookie, still requires CSRF/origin validation,
+   and clears the flow cookie. The client treats legacy-server logout 401 as
+   already revoked. Backend/session regressions and both browser tests passed.
+2. A stale Drive worker could persist an allocated file ID after losing its lease.
+   The file-ID write is now conditional on the current lease and absent prior ID;
+   a deliberate replacement-lease test returns 409 with **zero uploads**.
+   Credential refresh is serialized on both databases. Malformed/revoked tokens
+   fail visibly without changing credentials or leaking provider descriptions.
+3. Trusted CLI recovery changed the password hash but omitted the Google-only
+   password-enable flag. It now enables app-password login and revokes old/reset
+   sessions; the maintenance regression verifies preservation of school records.
+4. The new cold-return JS test reproduced repeated native launch-URL processing
+   after React Router changed its navigation callback. The App listener now has
+   a stable lifetime with a current navigation ref. Google return Strict Mode
+   still completes once. First-password expiry also now reveals reauthentication
+   instead of leaving the user on a stale enabled form; failed metadata panels
+   have explicit retry controls.
+5. Alembic comparison exposed SQLite `true` versus compiled `1` default drift.
+   The ORM now uses SQLAlchemy's portable `true()` just like the migration; both
+   real database comparisons pass. No schema comparison or auth assertion was
+   disabled to hide these failures.
+
+### Executed local verification
+
+- **246 Python tests passed in 105.74s**, SQLite and real isolated PostgreSQL,
+  including auth/signup/OAuth/Drive/maintenance/migrations and genuine OpenCV.
+- **238 frontend tests / 17 files passed in 17.82s**, plus **30 Node tests**.
+- TypeScript and production PWA build passed; **56 precache entries /
+  23,173.84 KiB**, 13.87s Vite build. Existing large-chunk warnings are nonfatal;
+  no low-end Android capacity certification is claimed.
+- **Both actual PostgreSQL Playwright workflows passed in 49.9s**: enterprise
+  CV/privacy/offline workflow 42.0s; registration/password-change/re-login/Drive
+  configuration 4.9s. Four signup theme/viewport and six Drive theme/viewport
+  checks had no horizontal overflow/page errors. Signup/security/mobile-dark
+  Drive screenshots were visually inspected. The exact disposable schema was
+  removed on shutdown; a subsequent catalog check found no leftover QA schemas.
+- Prettier / Ruff check + format, `pip check`, **zero Bandit findings**, **zero npm
+  advisories**, no known vulnerabilities in either runtime/development Python
+  hash lock. The official Google verifier uses real generated RSA/X.509 material
+  with a synthetic provider; SMTP is synthetic too, not external mail delivery.
+
+Transient synthetic evidence is ignored under `.cache/qa/google/` and the E2E
+artifact directory. Native compilation / real JVM / lint / APK signature and
+container migration acceptance must be checked against fresh branch CI, not
+inferred from these local results. No production Google project/credentials,
+canonical hosted domain, SMTP account or authorized live Drive user was supplied.
+Live consent/Drive/SMTP, physical Android returns, camera/print/PWA upgrades and
+permanent production deployment remain explicit operator/device acceptance gates.

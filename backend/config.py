@@ -30,6 +30,9 @@ class Settings:
     s3_region: str = field(default_factory=lambda: os.getenv("AWS_REGION", "ap-south-1"))
     auto_migrate: bool = field(default_factory=lambda: os.getenv("AUTO_MIGRATE", "true").lower() == "true")
     testing: bool = False
+    public_signup: bool = field(default_factory=lambda: os.getenv("PUBLIC_SIGNUP_ENABLED", "false").lower() == "true")
+    google_client_id: str = field(default_factory=lambda: os.getenv("GOOGLE_CLIENT_ID", ""))
+    google_client_secret: str = field(default_factory=lambda: os.getenv("GOOGLE_CLIENT_SECRET", ""))
 
     def __post_init__(self):
         self.data_dir = Path(self.data_dir).resolve()

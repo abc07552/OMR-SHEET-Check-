@@ -51,6 +51,7 @@ export class APIError extends Error {
   constructor(
     message: string,
     public status: number,
+    public code?: string,
   ) {
     super(message);
   }
@@ -77,10 +78,14 @@ export async function api<T = any>(
   if (!response.ok) {
     if (
       response.status === 401 &&
-      !/^\/(auth\/(login|recovery)|setup)/.test(path)
+      !/^\/(auth\/(login|recovery|logout)|setup)/.test(path)
     )
       window.dispatchEvent(new Event("omr-session-expired"));
-    throw new APIError(data.error || "The request failed.", response.status);
+    throw new APIError(
+      data.error || "The request failed.",
+      response.status,
+      data.code,
+    );
   }
   return data;
 }
@@ -118,6 +123,15 @@ interface Session {
   setSchool: (id: string) => void;
   login: (email: string, password: string) => Promise<void>;
   setup: (data: Record<string, unknown>) => Promise<void>;
+  signup: (
+    data: Record<string, unknown>,
+  ) => Promise<{ requiresVerification: boolean; message: string }>;
+  verifySignup: (data: { token: string; password: string }) => Promise<void>;
+  completeGoogle: (data: {
+    flowId: string;
+    ticket: string;
+    nativeVerifier?: string;
+  }) => Promise<{ intent: string; schoolId?: string }>;
   logout: () => Promise<void>;
   explore: () => void;
   openLogin: () => void;
@@ -220,7 +234,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     if (localStorage.getItem("omr-revoke-on-reconnect") !== "1")
       return Promise.resolve(false);
     const task = (async () => {
-      await api("/auth/logout", { method: "POST" });
+      try {
+        await api("/auth/logout", { method: "POST" });
+      } catch (error) {
+        // Legacy servers can return 401 for an already-revoked/expired cookie.
+        // That is not a connectivity failure or a reason to block the next login.
+        if (!(error instanceof APIError) || error.status !== 401) throw error;
+      }
       localStorage.removeItem("omr-revoke-on-reconnect");
       return true;
     })().finally(() => {
@@ -249,6 +269,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     path: string,
     values: Record<string, unknown>,
   ) => {
+    window.dispatchEvent(new Event("omr-google-cancelled"));
     const epoch = ++authEpoch.current;
     await revokeDeferred();
     if (epoch !== authEpoch.current) return;
@@ -377,7 +398,46 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     login: (email, password) =>
       authenticate("/auth/login", { email, password }),
     setup: (data) => authenticate("/setup", data),
+    signup: async (values) => {
+      window.dispatchEvent(new Event("omr-google-cancelled"));
+      const epoch = ++authEpoch.current;
+      await revokeDeferred();
+      if (epoch !== authEpoch.current)
+        throw new Error("Authentication changed. Start again.");
+      const data = await api<{
+        user?: AuthUser;
+        requiresVerification: boolean;
+        message: string;
+      }>("/auth/signup", { method: "POST", body: JSON.stringify(values) });
+      if (epoch !== authEpoch.current)
+        throw new Error("Authentication changed. Start again.");
+      if (data.user) await adopt(data.user, epoch);
+      return data;
+    },
+    verifySignup: (data) => authenticate("/auth/signup/verify", data),
+    completeGoogle: async (values) => {
+      const epoch = ++authEpoch.current;
+      await revokeDeferred();
+      if (epoch !== authEpoch.current)
+        throw new Error("Authentication changed. Start Google sign-in again.");
+      const data = await api<{
+        user: AuthUser;
+        intent: string;
+        schoolId?: string;
+      }>("/oauth/google/complete", {
+        method: "POST",
+        body: JSON.stringify(values),
+      });
+      await adopt(data.user, epoch);
+      if (epoch !== authEpoch.current)
+        throw new Error("Authentication changed. Start Google sign-in again.");
+      const selected = data.schoolId || activeSchool;
+      if (data.user.memberships.some((m) => m.schoolId === selected))
+        setSchool(selected);
+      return { intent: data.intent, schoolId: data.schoolId };
+    },
     logout: async () => {
+      window.dispatchEvent(new Event("omr-google-cancelled"));
       authEpoch.current++;
       lockVault();
       queryClient.clear();
@@ -400,6 +460,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       }
     },
     explore: () => {
+      window.dispatchEvent(new Event("omr-google-cancelled"));
       setConnectionOpen(false);
       authEpoch.current++;
       lockVault();

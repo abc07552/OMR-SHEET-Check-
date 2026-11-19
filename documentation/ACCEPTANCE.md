@@ -26,6 +26,25 @@ This is a **traceability and release-gate map**, not a declaration that all 19 s
 | 18 — QA/debugging          | Vitest, preserved Node tests, SQLite/PostgreSQL Pytest, actual native/browser CV and a production-bundle Playwright workflow. Reproduced worker/optical regressions fixed without bypassing review/authorization.                          | Systematic wider button/form/a11y/physical-device/report/PWA lifecycle coverage remains; passing selected suites is not proof of every requirement.                                                                                                                  |
 | 19 — Production deployment | Non-root FastAPI/native OCR image, PostgreSQL 17/private app role, explicit migrations, Caddy same-origin HTTPS topology, env example and operations guide. Earlier checkpoint container jobs executed successfully in GitHub Actions.     | **Blocked for final acceptance:** real host/DNS/secrets/cloud services, external TLS/device tests, monitoring/off-site restore rehearsal/capacity and operator release approval. This branch/PR is not a permanent production installation.                          |
 
+## Google/signup/Drive extension
+
+Stage 2 now includes the opt-in verified password-registration portal,
+Google sign-in/signup, password-confirmed explicit linking and recent-Google
+first-password creation. Existing-school teacher/student access remains controlled
+by administrators. Stage 16 now includes **manual**, per-administrator/school,
+encrypted Google Drive app-data backups with durable retries, authenticated
+downloads and non-destructive import into the existing password/CAS restore flow.
+This does not complete the clock-driven scheduling or full-DR gates above.
+
+The local full matrix passed **246 Python + 238 frontend + 30 Node tests**. Both
+real PostgreSQL/production-bundle Playwright tests passed, including registration,
+password change/re-login, private portal/privacy, real CV and offline sync.
+Provider HTTP and SMTP delivery are synthetic; Google identity signatures are
+verified with real RSA/X.509 and the official verifier. Actual Cloud credentials,
+consent/revocation/quotas, production SMTP and Android external-browser return /
+process death still need an operator-configured domain, authorized users and
+physical devices. See [GOOGLE_AUTH_DRIVE.md](GOOGLE_AUTH_DRIVE.md).
+
 ## Current continuation priorities
 
 1. Retain reproducible failure → root cause → regression → fix → full relevant retest evidence for every change. Do not mark earlier checks as verification of later code without rerunning CI.

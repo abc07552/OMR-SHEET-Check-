@@ -136,6 +136,31 @@ Optional recovery email settings: `SMTP_HOST`, `SMTP_PORT` (normally 587), `SMTP
 
 No external S3, SMTP transport, managed database or permanent HTTPS service was provisioned or certified in this development sandbox.
 
+## Optional public signup, Google login and Google Drive
+
+Follow [GOOGLE_AUTH_DRIVE.md](GOOGLE_AUTH_DRIVE.md) for the exact OAuth callback,
+consent configuration, signup verification, Android handoff and Drive limitations.
+`PUBLIC_SIGNUP_ENABLED` defaults false; new signups create isolated regular-school
+admins, not super-admins or memberships of existing schools. Production password
+signup requires working certificate-verified SMTP STARTTLS delivery.
+
+Set server-only `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` for a Google Cloud **Web
+application** client and enable Google Drive API. Register exactly your canonical
+`https://YOUR_REAL_DOMAIN/api/oauth/google/callback`; the complete app must be
+opened at `PUBLIC_APP_URL`. Compose passes these variables to the API/migrator.
+Do not put secrets in `VITE_*`, APKs, chat or the Arena Drive connector. Run the
+additive Alembic migration before upgrading the API. The production container
+disables access logs; also redact OAuth callback query strings from external
+proxy/APM logging. Never expose authorization codes or password/reset tokens.
+
+Drive uploads are manual, encrypted school-workspace archives in `appDataFolder`,
+not ordinary My Drive files. They exclude login accounts, original binaries,
+full database histories and the key. Keep the full database (including Drive
+history/file IDs), object storage and `BACKUP_KEY` separately. Import first creates
+a recovery point; restoring live records still requires app password, current
+revision and a pre-restore snapshot. Actual Google project approval, consent,
+quota, token expiry and mobile callback behavior need live acceptance testing.
+
 ## Upgrades, backup, restore and rollback
 
 Before every production upgrade:

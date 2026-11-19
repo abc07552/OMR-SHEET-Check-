@@ -289,6 +289,9 @@ def test_trusted_recovery_hidden_prompts_revoke_sessions_and_preserve_records(
     with app.state.sessions() as db:
         assert db.scalar(select(m.User)).password_hash == old_hash
         assert db.scalar(select(m.PasswordReset)) is not None
+        # Trusted recovery also enables an app password for a Google-only account.
+        db.scalar(select(m.User)).has_password = False
+        db.commit()
     new_password = "new-private-password-2026"
     prompts = []
 
@@ -306,6 +309,7 @@ def test_trusted_recovery_hidden_prompts_revoke_sessions_and_preserve_records(
         assert db.scalar(select(func.count()).select_from(m.Session)) == 0
         assert db.scalar(select(func.count()).select_from(m.PasswordReset)) == 0
         assert verify_password(new_password, db.scalar(select(m.User)).password_hash)
+        assert db.scalar(select(m.User)).has_password
     assert client.post("/api/auth/login", json={"email": "admin@school.edu", "password": PASSWORD}).status_code == 401
     assert (
         client.post("/api/auth/login", json={"email": "admin@school.edu", "password": new_password}).status_code == 200

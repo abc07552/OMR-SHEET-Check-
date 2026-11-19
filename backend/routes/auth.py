@@ -3,6 +3,7 @@ from __future__ import annotations
 import hmac
 import secrets
 import smtplib
+import ssl
 from datetime import timedelta
 from email.message import EmailMessage
 
@@ -109,7 +110,7 @@ def login(data: Credentials, request: Request, response: Response, db: Session =
     throttle(db, f"login-email:{email}", 12)
     user = db.scalar(select(m.User).where(m.User.email == email))
     valid = verify_password(data.password, user.password_hash if user else DUMMY_HASH)
-    if not user or not valid or not user.active:
+    if not user or not user.has_password or not valid or not user.active:
         audit(db, None, user.id if user else None, "Failed sign-in", ipHash=digest(ip(request)))
         db.commit()
         raise HTTPException(401, "Email or password is incorrect, or this account is suspended.")
@@ -128,13 +129,17 @@ def me(user: m.User = Depends(current_user), db: Session = Depends(db_session)):
 
 
 @router.post("/auth/logout")
-def logout(
-    request: Request, response: Response, user: m.User = Depends(current_user), db: Session = Depends(db_session)
-):
-    db.execute(delete(m.Session).where(m.Session.token_hash == digest(request.cookies.get(COOKIE, ""))))
-    audit(db, None, user.id, "Signed out")
+def logout(request: Request, response: Response, db: Session = Depends(db_session)):
+    # Logout only revokes the presented cookie; it is safely idempotent after a
+    # password reset, expiry or prior sign-out. CSRF/origin middleware still applies.
+    token = request.cookies.get(COOKIE, "")
+    row = db.get(m.Session, digest(token)) if token and len(token) <= 128 else None
+    if row:
+        audit(db, None, row.user_id, "Signed out")
+        db.delete(row)
     db.commit()
     response.delete_cookie(COOKIE, path="/")
+    response.delete_cookie("omr_google_flow", path="/api/oauth/google", secure=True, httponly=True, samesite="lax")
     return {"ok": True}
 
 
@@ -146,9 +151,9 @@ class PasswordChange(BaseModel):
 @router.post("/auth/password")
 def change_password(data: PasswordChange, user: m.User = Depends(current_user), db: Session = Depends(db_session)):
     throttle(db, f"change-password:{user.id}", 6)
-    if not verify_password(data.currentPassword, user.password_hash):
+    if not user.has_password or not verify_password(data.currentPassword, user.password_hash):
         raise HTTPException(403, "Your current password is incorrect.")
-    user.password_hash = hash_password(data.password)
+    user.password_hash, user.has_password = hash_password(data.password), True
     db.execute(delete(m.Session).where(m.Session.user_id == user.id))
     db.execute(delete(m.PasswordReset).where(m.PasswordReset.user_id == user.id))
     audit(db, None, user.id, "Changed password; all sessions revoked")
@@ -182,7 +187,7 @@ def recovery_request(data: RecoveryRequest, request: Request, db: Session = Depe
         )
         try:
             with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=15) as smtp:
-                smtp.starttls()
+                smtp.starttls(context=ssl.create_default_context())
                 if settings.smtp_user:
                     smtp.login(settings.smtp_user, settings.smtp_password)
                 smtp.send_message(message)
@@ -219,7 +224,7 @@ def recovery_reset(data: ResetPassword, request: Request, db: Session = Depends(
     if changed.rowcount != 1:
         raise HTTPException(400, "This recovery link was already used.")
     user = db.get(m.User, row.user_id)
-    user.password_hash = hash_password(data.password)
+    user.password_hash, user.has_password = hash_password(data.password), True
     db.execute(delete(m.Session).where(m.Session.user_id == user.id))
     audit(db, None, user.id, "Recovered password; all sessions revoked")
     db.commit()

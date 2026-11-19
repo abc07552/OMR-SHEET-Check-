@@ -129,7 +129,7 @@ def reset_password(email, settings):
             confirmation = getpass.getpass("Confirm new password (hidden): ")
             if password != confirmation:
                 raise ValueError("Passwords differ. No data was changed.")
-            user.password_hash = hash_password(password)
+            user.password_hash, user.has_password = hash_password(password), True
             db.execute(delete(m.Session).where(m.Session.user_id == user.id))
             db.execute(delete(m.PasswordReset).where(m.PasswordReset.user_id == user.id))
             audit(db, None, user.id, "Trusted-server password recovery; all sessions revoked")

@@ -1,0 +1,153 @@
+.auth-tabs {
+  display: flex;
+  gap: 6px;
+  padding: 5px;
+  background: light-dark(#edf2fa, #101c30);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  margin: 20px 0;
+}
+.auth-tabs button {
+  flex: 1;
+  border: 0;
+  border-radius: 8px;
+  padding: 11px 12px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.auth-tabs button.active {
+  background: var(--white);
+  color: var(--forest);
+  box-shadow: 0 2px 8px #17255410;
+  font-weight: 700;
+}
+.google-button {
+  min-height: 46px;
+  gap: 12px;
+}
+.google-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+  color: #2563eb;
+  border: 1px solid #dce3f0;
+  border-radius: 50%;
+  width: 26px;
+  height: 26px;
+  font-size: 18px;
+  font-weight: 750;
+}
+.auth-form-wrap {
+  padding-block: 40px;
+}
+.auth-form-wrap > form {
+  margin-block: auto;
+}
+.auth-form-wrap .form-fields {
+  gap: 14px;
+}
+.auth-form-wrap .auth-privacy {
+  line-height: 1.6;
+}
+.account-security .security-form {
+  display: grid;
+  gap: 14px;
+}
+.security-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  overflow-wrap: anywhere;
+}
+.security-google {
+  border-top: 1px solid var(--border);
+  padding-top: 22px;
+  margin-top: 8px;
+  display: grid;
+  gap: 14px;
+}
+.security-google h3 {
+  margin: 0;
+}
+.security-google p {
+  margin: 0;
+  line-height: 1.6;
+}
+.drive-backups {
+  margin-bottom: 24px;
+}
+.drive-backups .card-heading h2,
+.account-security .card-heading h2 {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+}
+.drive-backups p {
+  line-height: 1.65;
+}
+.drive-actions {
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.drive-history {
+  border-top: 1px solid var(--border);
+}
+.drive-history-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 18px;
+  padding: 18px 0;
+  border-bottom: 1px solid var(--border);
+}
+.drive-history-row > div:first-child {
+  display: grid;
+  gap: 5px;
+}
+.drive-history-row small {
+  color: var(--muted);
+  font-size: 12px;
+}
+.drive-history-row .row-actions {
+  flex-wrap: wrap;
+}
+.oauth-return {
+  max-width: 560px;
+  display: grid;
+  gap: 20px;
+  text-align: center;
+  justify-items: center;
+  padding: 32px;
+}
+.oauth-return h1 {
+  font-size: 25px;
+}
+html[data-theme="dark"] .auth-tabs {
+  background: #101c30;
+}
+html[data-theme="dark"] .auth-tabs button.active {
+  background: #1b2c47;
+  color: #9ec2ff;
+}
+@media (max-width: 600px) {
+  .auth-form-wrap {
+    padding-block: 28px;
+  }
+  .drive-history-row .row-actions,
+  .drive-actions {
+    width: 100%;
+  }
+  .drive-history-row button {
+    flex: 1;
+    white-space: normal;
+  }
+  .security-summary .soft-tag {
+    white-space: normal;
+  }
+}

@@ -1,4 +1,6 @@
+import AccountSecurity from "./AccountSecurity";
 import { useEffect, useState } from "react";
+import { useLocation } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   Area,
@@ -84,8 +86,11 @@ interface Portal {
 }
 export default function StudentPortal() {
   const session = useSession(),
+    route = useLocation(),
     school = session.activeSchool;
-  const [tab, setTab] = useState<"results" | "progress" | "profile">("results"),
+  const [tab, setTab] = useState<"results" | "progress" | "profile">(() =>
+      route.pathname === "/settings" ? "profile" : "results",
+    ),
     [selected, setSelected] = useState<PersonalResult | null>(null),
     [busy, setBusy] = useState(""),
     [notice, setNotice] = useState(""),
@@ -502,6 +507,7 @@ export default function StudentPortal() {
         )}
         {tab === "profile" && (
           <div className="enterprise-two-columns">
+            {session.backend === "fastapi" && <AccountSecurity />}
             <section className="card">
               <div className="card-heading">
                 <div>

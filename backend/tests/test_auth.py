@@ -110,3 +110,17 @@ def test_membership_scope_suspension_and_owners(client, populated):
     assert client.patch(f"/api/schools/{sid}/users/{teacher}", json={"suspended": False}).status_code == 200
     login_as(client, "teacher@school.edu")
     assert len(get_workspace(client, sid)["workspace"]["students"]) == 2
+
+
+def test_logout_is_idempotent_even_after_password_revocation(client, school):
+    assert (
+        client.post(
+            "/api/auth/password", json={"currentPassword": PASSWORD, "password": "revoked-logout-password"}
+        ).status_code
+        == 200
+    )
+    assert client.get("/api/auth/me").status_code == 401
+    assert client.post("/api/auth/logout").status_code == 200
+    assert client.post("/api/auth/logout").status_code == 200
+    assert client.post("/api/auth/logout", headers={"X-Markly-Request": "0"}).status_code == 403
+    assert client.get("/api/auth/me").status_code == 401

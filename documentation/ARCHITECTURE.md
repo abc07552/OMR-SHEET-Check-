@@ -9,11 +9,43 @@ The React application remains the scanner/designer/reporting client. Enterprise 
 ## Trust boundaries
 
 - A school has normalized classes, students, examinations, templates, results and answer detections. Composite foreign keys enforce school ownership. Active roll numbers and exam/student results have unique indexes. Soft deletion retains evaluation history.
-- Users have school-scoped admin, teacher or student memberships. Super administrators create institutions. Teachers see only assigned classes, their students and associated examinations; keys shared with unassigned classes are read-only. Per-teacher scan, report and examination permissions are checked on the server. Revoked/suspended memberships take effect on the next request.
+- Users have school-scoped admin, teacher or student memberships. Super administrators create institutions; opt-in public signup can create a new, isolated institution with a regular school administrator, never super-admin privilege or membership in another school. Teachers see only assigned classes, their students and associated examinations; keys shared with unassigned classes are read-only. Per-teacher scan, report and examination permissions are checked on the server. Revoked/suspended memberships take effect on the next request.
 - Students cannot download school workspaces, staff analytics, keys, original images or other learners' records. The portal and report endpoints release only their own evaluated results after explicit result publication. Old evaluations are staff-only.
 - Passwords use Argon2id (64 MiB, three iterations, two lanes), sessions are hashed opaque 24-hour tokens in HttpOnly cookies. Recovery tokens are hashed, single-use and expire after 30 minutes. No seeded/default accounts. Login/reset throttles are persistent database records. Setup uses a unique database sentinel to prevent a concurrent second bootstrap.
 - Mutation requests require a custom header and a same-origin or explicitly configured origin. Production uses Secure cookies, security headers and an HTTPS application URL. User content never becomes executable HTML. The local OpenCV.js Emscripten runtime requires the narrowly documented `unsafe-eval`/WebAssembly policy already used by Markly.
 - Uploads are bounded, validated by decoding, and guarded against oversized images and workbook zip bombs. Original scan objects and application recovery points are encrypted before local/S3 storage. The backup key is a server secret, not a `VITE_*` variable.
+
+## Google accounts and Drive isolation
+
+The FastAPI auth portal includes verified production password signup, Google
+sign-in/signup, password-confirmed explicit linking and recent-Google first-app-
+password creation. Public signup is operator-disabled by default and cannot
+replace first-super-admin setup. Legacy user hashes/sessions survive the additive
+migration; older sessions are never treated as recent Google reauthentication.
+Trusted CLI recovery and administrator resets also enable the app-password flag.
+
+Google Authorization Code uses server-held S256 PKCE, random state/nonce and the
+official signed ID-token verifier. Only `sub` identifies an existing link; matching
+an email never logs into an existing account. Browser completion is tied to its
+Secure HttpOnly flow cookie; Android opens an external Custom Tab and adds an
+independent WebView-held proof for its short-lived, single-use scheme ticket.
+Incoming callbacks cannot change servers or navigate arbitrary deep links. The
+App listener has a stable lifetime across route changes; cold-launch URLs are not
+replayed on each navigation. Process death without local proof fails closed.
+
+Drive permission is separate `drive.appdata` consent, per school and administrator.
+Refresh/access credentials are encrypted with the server key and never sent to
+the UI. Manual backup takes a coherent server-workspace snapshot, encrypts before
+uploading and persists the operation, immutable snapshot, three-minute lease and
+preallocated remote file ID. Lease-fenced writes prevent a stale worker replacing
+a newer file ID. Credential refresh is serialized on PostgreSQL and SQLite.
+Remote hash/size/metadata are verified before download/import. Import only creates
+a server recovery point; destructive restore still requires app password,
+current-revision CAS, same-school binding and a pre-restore safety snapshot.
+
+See [GOOGLE_AUTH_DRIVE.md](GOOGLE_AUTH_DRIVE.md) for exact server credentials,
+canonical callback, production email verification, Android and backup limits.
+Live provider/domain/device acceptance is separate from synthetic transport tests.
 
 ## Concurrency and history
 
@@ -35,6 +67,6 @@ Workspace recovery points do not replace database disaster-recovery backups, ori
 
 ## Reproducibility and verification
 
-`backend/requirements.in` / `requirements-dev.in` declare selected versions; `.lock` files pin the tested CPython 3.11 closures with published non-yanked PyPI artifact SHA-256 hashes. Runtime contains 46 distributions; development contains 82, including development-only Bandit. `scripts/lock-python.py` checks installed direct/transitive specifiers, registry identity and digests and completes both closures before writing. Docker/CI enforce `--require-hashes --only-binary=:all:` to avoid unpinned source-build dependencies. A clean Linux x86-64 CPython 3.11 install and a rejected tampered hash exercise these guarantees; other platform closures and publisher/build provenance need separate verification. `package-lock.json` locks JavaScript dependencies. Optional PostgreSQL QA binaries have their own input file and are excluded from runtime/development locks.
+`backend/requirements.in` / `requirements-dev.in` declare selected versions; `.lock` files pin the tested CPython 3.11 closures with published non-yanked PyPI artifact SHA-256 hashes. Runtime contains 52 distributions; development contains 85, including development-only Bandit. `scripts/lock-python.py` checks installed direct/transitive specifiers, registry identity and digests and completes both closures before writing. Docker/CI enforce `--require-hashes --only-binary=:all:` to avoid unpinned source-build dependencies. A clean Linux x86-64 CPython 3.11 install and a rejected tampered hash exercise these guarantees; other platform closures and publisher/build provenance need separate verification. `package-lock.json` locks JavaScript dependencies. Optional PostgreSQL QA binaries have their own input file and are excluded from runtime/development locks.
 
 Run `python -m pytest`, `ruff check backend scripts`, `npm run test:all`, `npm run build`, and the browser tests. See `PROGRESS.md` for actual executed results, `SECURITY_AUDIT.md` / `PERFORMANCE.md` for review and measurements, and `ACCEPTANCE.md` for remaining release gates rather than assuming every requirement is complete.

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useLayoutEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -182,7 +182,15 @@ export default function ResetAccount() {
   const [params] = useSearchParams(),
     navigate = useNavigate(),
     [success, setSuccess] = useState(false),
+    [token] = useState(() => params.get("token") || ""),
     [error, setError] = useState("");
+  useLayoutEffect(() => {
+    window.history.replaceState(
+      window.history.state,
+      "",
+      window.location.pathname + window.location.search + "#/reset",
+    );
+  }, []);
   const form = useForm<z.infer<typeof resetSchema>>({
     resolver: zodResolver(resetSchema),
   });
@@ -214,7 +222,7 @@ export default function ResetAccount() {
                 await api("/auth/recovery/reset", {
                   method: "POST",
                   body: JSON.stringify({
-                    token: params.get("token") || "",
+                    token,
                     password: data.password,
                   }),
                 });
@@ -270,6 +278,82 @@ export default function ResetAccount() {
           Back to workspace
         </button>
       </div>
+    </div>
+  );
+}
+
+export function VerifyEmail() {
+  const [params] = useSearchParams(),
+    session = useSession(),
+    navigate = useNavigate();
+  const [token] = useState(() => params.get("token") || ""),
+    [password, setPassword] = useState(""),
+    [error, setError] = useState(""),
+    [busy, setBusy] = useState(false);
+  useLayoutEffect(() => {
+    window.history.replaceState(
+      window.history.state,
+      "",
+      window.location.pathname + window.location.search + "#/verify-email",
+    );
+  }, []);
+  return (
+    <div className="initial-loader reset-account">
+      <Logo />
+      <section className="card">
+        <span className="eyebrow">VERIFY YOUR EMAIL</span>
+        <h1>One last step to your workspace.</h1>
+        <p>
+          Enter the app password you chose during signup. Opening this link
+          alone does not activate an account. The link expires in 30 minutes and
+          can be used only once.
+        </p>
+        <form
+          className="form-fields"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            setBusy(true);
+            setError("");
+            try {
+              await session.verifySignup({ token, password });
+              navigate("/overview", { replace: true });
+            } catch (e) {
+              setError(
+                e instanceof Error ? e.message : "Email verification failed.",
+              );
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          <label>
+            Your chosen app password
+            <input
+              type="password"
+              autoComplete="current-password"
+              required
+              minLength={12}
+              maxLength={128}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+          </label>
+          {error && (
+            <p className="form-error" role="alert">
+              {error}
+            </p>
+          )}
+          <button className="button button-primary" disabled={busy || !token}>
+            {busy ? "Verifying…" : "Verify email & open workspace"}
+          </button>
+        </form>
+        <button
+          className="text-button"
+          onClick={() => navigate("/overview", { replace: true })}
+        >
+          Back to sign in
+        </button>
+      </section>
     </div>
   );
 }

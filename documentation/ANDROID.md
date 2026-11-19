@@ -100,6 +100,32 @@ site. Hosted PWA/offline-vault behavior still requires device acceptance testing
 Python, PostgreSQL, SMTP, S3 and server workers **are not embedded in an APK**.
 The hosted build is a native WebView client, not an on-device Python server.
 
+## Google sign-in and Drive authorization
+
+The hosted FastAPI portal now supports Google sign-in/sign-up and a separate
+Google Drive backup connection. Configure your server's Google Cloud Web OAuth
+client, canonical HTTPS callback and signup policy using
+[GOOGLE_AUTH_DRIVE.md](GOOGLE_AUTH_DRIVE.md). No Google client secret belongs in an
+APK. **This requires an updated APK** containing Capacitor App 8.1.2 / Browser
+8.0.5 plugins and the package-specific callback filter; updating only a previously
+installed native shell is not enough to add these plugins.
+
+Consent opens in an external Android Custom Tab, never embedded Google OAuth in
+the app WebView. Google's code returns to the canonical HTTPS server. A two-minute
+single-use ticket returns to `${applicationId}://oauth/callback`, bound to an
+independent device-generated S256 proof; a stolen scheme URL alone cannot sign
+in. Only release/debug package IDs are accepted. No provider token, session bearer
+token, arbitrary redirect or server-switch instruction travels in the URL.
+
+Google-only accounts should set an **app password** after recent Google
+verification in Settings (students: Profile) before password-confirmed restores.
+The app never asks for a Google password. Google consent can be cancelled without
+changing records. If Android kills the WebView and loses pending session storage,
+restart sign-in; completion fails closed. Test real browser return, cancellation,
+rotation, process death and sign-out/server-change races on representative phones
+with your actual Google project. Synthetic proof/claim tests and compilation do
+not constitute those physical-device or live-provider checks.
+
 ## Toolchain and local commands
 
 Pinned Capacitor core/Android/CLI **8.6.2** requires Node **22.13+**, **JDK 21**,

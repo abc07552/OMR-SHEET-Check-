@@ -71,6 +71,9 @@ def main():
             s3_bucket="",
             static_dir=ROOT / "dist",
             auto_migrate=True,
+            public_signup=True,  # Disposable QA only; production remains opt-in.
+            google_client_id="",
+            google_client_secret="",
         )
         if not (settings.static_dir / "index.html").is_file():
             raise RuntimeError("Run npm run build before browser QA.")

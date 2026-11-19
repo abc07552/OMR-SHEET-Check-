@@ -108,6 +108,18 @@ jobs:
           grep -q "sdkVersion:'24'" .cache/android/apk-manifest.txt
           grep -q "targetSdkVersion:'36'" .cache/android/apk-manifest.txt
           grep -q "launchable-activity:" .cache/android/apk-manifest.txt
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump xmltree "$apk" AndroidManifest.xml > .cache/android/apk-manifest-tree.txt
+          python3 - "$apk" <<'PY'
+          import json, re, sys, zipfile
+          from pathlib import Path
+          manifest = Path('.cache/android/apk-manifest-tree.txt').read_text()
+          for attribute, expected in [('scheme', 'com.markly.omrpro.debug'), ('host', 'oauth'), ('path', '/callback')]:
+              assert re.search(r'android:' + attribute + r'\([^)]*\)="' + re.escape(expected) + '"', manifest), attribute
+          with zipfile.ZipFile(sys.argv[1]) as archive:
+              plugins = {entry['classpath'] for entry in json.loads(archive.read('assets/capacitor.plugins.json'))}
+          assert {'com.capacitorjs.plugins.app.AppPlugin', 'com.capacitorjs.plugins.browser.BrowserPlugin'} <= plugins, plugins
+          print('Verified compiled OAuth callback and native external-browser / app-return plugin registration.')
+          PY
           mkdir -p .cache/android/apk
           cp "$apk" .cache/android/apk/omr-checker-ai-pro-debug.apk
           (cd .cache/android/apk && sha256sum omr-checker-ai-pro-debug.apk > SHA256SUMS.txt)
@@ -141,6 +153,7 @@ jobs:
             android/app/build/reports/lint-results-debug.*
             .cache/android/gradle.log
             .cache/android/apk-manifest.txt
+            .cache/android/apk-manifest-tree.txt
           include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 7

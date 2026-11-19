@@ -307,7 +307,7 @@ def reset_member_password(
             403,
             "Multi-school accounts and super administrators must use their own recovery flow or trusted-server recovery.",
         )
-    target.password_hash = hash_password(data.password)
+    target.password_hash, target.has_password = hash_password(data.password), True
     db.execute(delete(m.Session).where(m.Session.user_id == target_id))
     db.execute(delete(m.PasswordReset).where(m.PasswordReset.user_id == target_id))
     audit(db, school_id, user.id, "Reset a member password; sessions revoked", targetId=target_id)
@@ -416,7 +416,7 @@ def restore_backup(
 ):
     membership(db, user, school_id, "admin")
     throttle(db, f"restore:{user.id}", 6)
-    if not verify_password(data.password, user.password_hash):
+    if not user.has_password or not verify_password(data.password, user.password_hash):
         raise HTTPException(403, "Your current password is required to restore a recovery point.")
     if data.revision is None:
         raise HTTPException(400, "Reload before restoring and send the current workspace revision.")

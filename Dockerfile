@@ -39,4 +39,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=30s \
     CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=4).close()"]
 # Trust only the local reverse proxy. See deployment/compose.yaml for its fixed
 # private address; never trust arbitrary forwarded headers on a public API port.
-CMD ["uvicorn", "backend.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips=127.0.0.1,172.29.241.10"]
+CMD ["uvicorn", "backend.main:create_app", "--factory", "--no-access-log", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips=127.0.0.1,172.29.241.10"]

@@ -69,7 +69,11 @@ Advanced overrides:
 
 ### What the committed browser test asserts
 
-`e2e/enterprise.spec.ts` is one ordered, isolated workflow. Steps share the records they deliberately create; rerun the **whole test with a fresh helper**, not a middle step against yesterday's database.
+`e2e/enterprise.spec.ts` contains an ordered enterprise workflow and a second
+real password-registration/security workflow. The helper explicitly enables
+public signup for **disposable QA only**, and explicitly leaves Google
+credentials empty. Rerun the **whole file with a fresh helper**, not a middle step
+against yesterday's database.
 
 1. First-admin setup through the UI; real API/database-backed classes, students and two differently assigned assessments. No fictional dashboard counters.
 2. Column-mapped CSV import, valid/duplicate/invalid preview, actual invalid-row download, no insertion before explicit confirmation, and transactional confirmation.
@@ -90,6 +94,52 @@ The hook regressions in `src/session.test.tsx` additionally record render-time s
 This does **not** establish arbitrary-photo accuracy, OCR correctness on every identity, physical Android behavior, all report categories, every authorization race, install-prompt/update lifecycle, or cloud reliability. The real-ink image is a deterministic fixture, not a production accuracy corpus; detection is never mocked or derived from the answer key. The offline PDF is intentionally blank and therefore checks blank detection, PDF/WASM/OCR asset availability and synchronization rather than a second full marked-answer accuracy corpus.
 
 Failure artifacts: `.cache/qa/e2e-artifacts/` includes screenshots, an accessibility snapshot and a Playwright trace on failure. Open a trace locally with `npx playwright show-trace <trace.zip>`. A trace can contain QA cookies, requests and synthetic credentials; never publish traces from real student sessions.
+
+## Google/signup/Drive regressions
+
+See [GOOGLE_AUTH_DRIVE.md](GOOGLE_AUTH_DRIVE.md) for configuration and live-test
+boundaries. `backend/tests/test_google_and_drive.py` uses bounded HTTPX synthetic
+provider transport but real generated RSA signatures / X.509 certificates and
+the official Google verifier. Both database engines exercise state/cookie/nonce/
+PKCE/ticket replay, forged/invalid identity, password-confirmed linking, isolated
+signup, recent-Google first-password creation, scope separation, encrypted refresh
+credentials, cross-user/school/role refusal, durable upload retries, expired-lease
+file-ID fencing, integrity checking, non-destructive import, password/revision
+restore and revoked/disconnected provider behavior. No OMR detection is mocked.
+
+`test_registration.py` covers opt-in/bootstrap boundaries, verified production
+SMTP signup, chosen-password proof, expiry/single-use, non-enumerating responses,
+throttles, pending-signup resend protection and preservation of existing users /
+sessions through the additive migration. SMTP transport and Google service are
+synthetic; external delivery/consent/quotas are not certified.
+
+`src/googleAuth.test.ts` checks real client S256 proofs, external-browser-only
+launch, origin/package/path/ticket bounds and cancellation of a late start after
+school departure. `GoogleReturn.test.tsx` checks one completion under React Strict
+Mode, cancellation, absent/mismatched proof and password-linking explanations.
+The session suite checks legacy-server 401 logout after prior revocation so it
+cannot strand sign-in in an offline loop.
+
+`GoogleNativeBridge.test.tsx` covers cold-launch and warm callback dispatch,
+origin/proof loss, sign-out/server departure and explicit native-plugin failure.
+Its cold-return regression reproduced duplicate listener/launch-URL processing
+when a route change replaced React Router's navigate callback; the listener now
+retains a stable lifetime and uses the current navigation ref. These are JS
+plugin-shaped tests, not real-device instrumentation. AccountSecurity tests cover
+password confirmation, error feedback, Google-only password creation and expired
+five-minute authorization exposing a reauthentication button. The Alembic schema
+comparison covers the new tables, constraints, indexes and account/session
+columns on both database engines; a SQLite boolean-default representation drift
+was reproduced and fixed with SQLAlchemy's portable `true()` expression.
+
+The second Playwright test registers a new isolated institution through the real
+portal, checks password confirmation, changes password, signs out/reloads/signs
+back in, and verifies the unconfigured Drive panel/disabled connection rather
+than pretending Google is connected. It checks six Drive-screen theme/viewport
+combinations. Its first run **reproduced an offline sign-in loop after password
+revocation**; logout is now idempotent and deferred revocation treats an already-
+revoked legacy cookie as complete. The unchanged registration/re-login assertions
+then passed with the entire genuine enterprise browser test.
 
 ## Optical, worker-lease and dependency-integrity regressions
 

@@ -16,9 +16,10 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .config import Settings
 from .db import engine_for, migrate, require_current_schema, sessions_for
+from .google_provider import GoogleProvider
 from .models import ScanJob, StoredObject
 from .object_store import ObjectStore
-from .routes import auth, records, reports, scans, workspace
+from .routes import auth, drive, google_oauth, records, registration, reports, scans, workspace
 from .security import current_user
 
 logger = logging.getLogger(__name__)
@@ -102,6 +103,7 @@ def create_app(settings: Settings | None = None):
         sessions_for(engine),
         store,
     )
+    app.state.google = GoogleProvider(settings)
     app.add_middleware(BodyLimitMiddleware)
 
     @app.middleware("http")
@@ -119,7 +121,9 @@ def create_app(settings: Settings | None = None):
         else:
             response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["Referrer-Policy"] = "same-origin"
+        response.headers["Referrer-Policy"] = (
+            "no-referrer" if request.url.path.startswith("/api/oauth/") else "same-origin"
+        )
         response.headers["Permissions-Policy"] = "camera=(self), microphone=(), geolocation=()"
         response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
         response.headers["Content-Security-Policy"] = (
@@ -242,7 +246,16 @@ def create_app(settings: Settings | None = None):
             "permanentCloudDeployment": bool(settings.production),
         }
 
-    for router in (auth.router, workspace.router, records.router, scans.router, reports.router):
+    for router in (
+        auth.router,
+        registration.router,
+        google_oauth.router,
+        drive.router,
+        workspace.router,
+        records.router,
+        scans.router,
+        reports.router,
+    ):
         app.include_router(router)
 
     @app.api_route("/api/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])

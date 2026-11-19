@@ -17,6 +17,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     text,
+    true,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -51,6 +52,8 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(200), unique=True, index=True)
     name: Mapped[str] = mapped_column(String(120))
     password_hash: Mapped[str] = mapped_column(Text)
+    has_password: Mapped[bool] = mapped_column(Boolean, default=True, server_default=true())
+    email_verified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     super_admin: Mapped[bool] = mapped_column(Boolean, default=False)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
@@ -75,6 +78,8 @@ class Session(Base):
     token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+    auth_method: Mapped[str] = mapped_column(String(16), default="password", server_default="password")
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=now, nullable=True)
 
 
 class PasswordReset(Base):
@@ -310,3 +315,87 @@ class SystemState(Base):
     __tablename__ = "system_state"
     key: Mapped[str] = mapped_column(String(40), primary_key=True)
     value: Mapped[str] = mapped_column(Text)
+
+
+class PendingSignup(Base):
+    __tablename__ = "pending_signups"
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    email: Mapped[str] = mapped_column(String(200), unique=True)
+    name: Mapped[str] = mapped_column(String(120))
+    school_name: Mapped[str] = mapped_column(String(120))
+    password_hash: Mapped[str] = mapped_column(Text)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+
+
+class GoogleIdentity(Base):
+    __tablename__ = "google_identities"
+    subject: Mapped[str] = mapped_column(String(255), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), unique=True)
+    email: Mapped[str] = mapped_column(String(200))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+
+
+class GoogleOAuthFlow(Base):
+    __tablename__ = "google_oauth_flows"
+    id: Mapped[str] = mapped_column(String(120), primary_key=True, default=uid)
+    state_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    browser_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    nonce_hash: Mapped[str] = mapped_column(String(64))
+    verifier_encrypted: Mapped[str] = mapped_column(Text)
+    intent: Mapped[str] = mapped_column(String(16))
+    client_mode: Mapped[str] = mapped_column(String(10))
+    app_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    native_challenge: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
+    session_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    school_id: Mapped[str | None] = mapped_column(ForeignKey("schools.id", ondelete="CASCADE"), nullable=True)
+    extra: Mapped[dict] = mapped_column(JSON, default=dict)
+    status: Mapped[str] = mapped_column(String(16), default="pending")
+    result_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ticket_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+
+
+class GoogleDriveConnection(Base):
+    __tablename__ = "google_drive_connections"
+    id: Mapped[str] = mapped_column(String(120), primary_key=True, default=uid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    school_id: Mapped[str] = mapped_column(ForeignKey("schools.id", ondelete="CASCADE"), index=True)
+    subject: Mapped[str] = mapped_column(String(255))
+    email: Mapped[str] = mapped_column(String(200))
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    credentials_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+    __table_args__ = (
+        UniqueConstraint("user_id", "school_id", "subject", name="drive_connection_subject_unique"),
+        Index(
+            "uq_active_drive_connection",
+            "user_id",
+            "school_id",
+            unique=True,
+            sqlite_where=text("active = true"),
+            postgresql_where=text("active = true"),
+        ),
+    )
+
+
+class GoogleDriveBackup(Base):
+    __tablename__ = "google_drive_backups"
+    id: Mapped[str] = mapped_column(String(120), primary_key=True, default=uid)
+    connection_id: Mapped[str] = mapped_column(ForeignKey("google_drive_connections.id"), index=True)
+    operation_id: Mapped[str] = mapped_column(String(120))
+    revision: Mapped[int] = mapped_column(Integer)
+    key: Mapped[str] = mapped_column(String(500))
+    sha256: Mapped[str] = mapped_column(String(64))
+    size: Mapped[int] = mapped_column(Integer)
+    file_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), default="pending")
+    error: Mapped[str] = mapped_column(String(500), default="")
+    lease_token: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    recovery_id: Mapped[str | None] = mapped_column(ForeignKey("recovery_points.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+    uploaded_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    __table_args__ = (UniqueConstraint("connection_id", "operation_id", name="drive_backup_operation_unique"),)

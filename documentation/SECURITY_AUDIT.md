@@ -6,6 +6,33 @@ This is an engineering security review of this branch, **not an independent pene
 
 Use [PROGRESS.md](PROGRESS.md) for checkpoint results and the PR's current-head checks for CI. No real school database, private image corpus, production credentials, external bucket or mail account was used in these checks.
 
+## Google/signup/Drive follow-up
+
+The current local checkpoint passed **246 backend tests** on SQLite / isolated
+PostgreSQL, **238 frontend + 30 preserved Node tests**, both production-bundle
+PostgreSQL browser workflows, TypeScript/build, Prettier/Ruff, `pip check`,
+**zero Bandit findings** (no `nosec` annotations), **zero npm advisories** and no
+known PyPI vulnerabilities in either hash-locked closure. This is separate from
+the older optical checkpoint's counts below and is not live Google acceptance.
+
+Reviewed controls: isolated opt-in registration after protected bootstrap;
+production email token plus chosen-password proof and protected resend; verified
+SMTP STARTTLS; no email-only Google linking; official signature/issuer/audience/
+nonce checks; cookie / native-proof-bound one-use handoffs; current-session checks
+for linking/Drive; recent-Google first-password creation; encrypted server-only
+provider credentials; separate narrow Drive consent; per-school/admin authorization;
+lease-fenced immutable backup retries and integrity checks; non-destructive
+import followed by the existing password/revision restore gate. Idempotent logout
+clears revoked/absent cookies without dropping CSRF/origin checks. Trusted CLI
+recovery enables password login for Google-only accounts and revokes sessions.
+
+Google/SMTP HTTP delivery in automated tests is synthetic. Real RSA signatures /
+official verifier are exercised, not mocked identity acceptance. Cloud-console
+consent, production mail delivery, token lifetimes/quota, physical Android callback
+and external operator TLS/logging/key custody still need live validation. See
+[GOOGLE_AUTH_DRIVE.md](GOOGLE_AUTH_DRIVE.md). Drive is manual workspace backup,
+not a full database/original-image DR solution or scheduled synchronization.
+
 ## Executed checks in the optical/worker/storage hardening checkpoint
 
 | Check                                 | Observed result                                                                                                                                                                 | Scope / limitation                                                                                                                                          |

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import DriveBackups from "./DriveBackups";
 import {
   ArrowDownToLine,
   Check,
@@ -165,6 +166,16 @@ export default function Backups({
           {error}
         </div>
       )}
+      {cloud && admin && session.backend === "fastapi" && (
+        <DriveBackups
+          key={`${session.user?.id}-${schoolId}`}
+          schoolId={schoolId}
+          onImported={async (point) => {
+            await refresh();
+            setRestoreServer(point);
+          }}
+        />
+      )}
       <div className="backup-transfer-grid">
         <section className="card">
           <div className="card-heading">
@@ -275,10 +286,10 @@ export default function Backups({
           {cloud && admin ? (
             <div className="form-fields">
               <p className="muted">
-                Automatic backups are created before the first write in each
-                15-minute window and daily while the server is running.
-                Replicate the server volume to separate storage for disaster
-                recovery.
+                FastAPI creates an automatic recovery point before the first
+                workspace write each day. These are not automatic Google Drive
+                uploads. Replicate the server volume to separate storage for
+                disaster recovery.
               </p>
               <button
                 className="button button-secondary"
@@ -530,10 +541,12 @@ export default function Backups({
             <div className="modal-body form-fields">
               <p>
                 This replaces the school’s shared workspace for all teachers. A
-                pre-restore server backup will be kept.
+                pre-restore server backup will be kept. Google-only accounts
+                must first set an app password in Settings. Your Google password
+                is never accepted here.
               </p>
               <label>
-                Your current account password
+                Your current app password
                 <input
                   type="password"
                   required

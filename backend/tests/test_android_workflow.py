@@ -114,3 +114,38 @@ def test_android_junit_failure_name_and_message_survive_diagnostic_annotations(t
     assert "SYNTHETIC raw-control assertion" in combined
     assert "synthetic assertion trace" in combined
     assert all(len(line.encode()) < 4096 for line in lines)
+
+
+def test_android_oauth_manifest_and_plugin_gate_refuses_missing_native_return_support(tmp_path, monkeypatch):
+    """Synthetic ZIP/text tests the CI gate only, not real Android compilation."""
+    import json
+    import sys
+    import zipfile
+
+    import pytest
+
+    monkeypatch.chdir(tmp_path)
+    directory = tmp_path / ".cache/android"
+    directory.mkdir(parents=True)
+    manifest = directory / "apk-manifest-tree.txt"
+    correct = "\n".join(
+        f'android:{key}(0x01010000)="{value}"'
+        for key, value in [("scheme", "com.markly.omrpro.debug"), ("host", "oauth"), ("path", "/callback")]
+    )
+    manifest.write_text(correct)
+    apk = tmp_path / "synthetic.zip"
+    monkeypatch.setattr(sys, "argv", ["verify-synthetic", str(apk)])
+    script = workflow_step("Verify signed APK")["run"].split("python3 - \"$apk\" <<'PY'\n", 1)[1].split("\nPY", 1)[0]
+    plugins = [{"classpath": "com.capacitorjs.plugins.app.AppPlugin"}]
+    with zipfile.ZipFile(apk, "w") as archive:
+        archive.writestr("assets/capacitor.plugins.json", json.dumps(plugins))
+    with pytest.raises(AssertionError):
+        exec(compile(script, "synthetic-compiled-oauth-gate", "exec"), {})
+    plugins.append({"classpath": "com.capacitorjs.plugins.browser.BrowserPlugin"})
+    with zipfile.ZipFile(apk, "w") as archive:
+        archive.writestr("assets/capacitor.plugins.json", json.dumps(plugins))
+    manifest.write_text(correct.replace("com.markly.omrpro.debug", "untrusted.app"))
+    with pytest.raises(AssertionError):
+        exec(compile(script, "synthetic-compiled-oauth-gate", "exec"), {})
+    manifest.write_text(correct)
+    exec(compile(script, "synthetic-compiled-oauth-gate", "exec"), {})
