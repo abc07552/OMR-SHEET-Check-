@@ -381,16 +381,59 @@ test("genuine enterprise workflows, restricted portals, reports and encrypted of
       .click();
     offlineTemplate = await readFile((await (await templateDownload).path())!);
     expect(offlineTemplate.subarray(0, 4).toString()).toBe("%PDF");
-    await navigate(page, "system");
+    // Delay the genuine first GET, not its content. The UI must not accept
+    // edits against placeholder defaults or an unrelated workspace revision.
+    let releaseSettings!: () => void;
+    const settingsReady = new Promise<void>((resolve) => {
+        releaseSettings = resolve;
+      }),
+      settingsRoute = `**/api/schools/${school}/settings`;
+    await page.route(settingsRoute, async (route) => {
+      if (route.request().method() !== "GET") return route.continue();
+      const response = await route.fetch();
+      await settingsReady;
+      await route.fulfill({ response });
+    });
+    try {
+      await navigate(page, "system");
+      await expect(
+        page.getByLabel("Academic session", { exact: true }),
+      ).toBeDisabled();
+      await expect(
+        page.getByRole("button", {
+          name: "Save institution defaults",
+          exact: true,
+        }),
+      ).toBeDisabled();
+    } finally {
+      releaseSettings();
+    }
+    await expect(
+      page.getByLabel("Academic session", { exact: true }),
+    ).toBeEnabled();
+    await page.unroute(settingsRoute);
     await page
       .getByLabel("Academic session", { exact: true })
       .fill("2026–27 QA");
     await page
       .getByLabel("Contact email", { exact: true })
       .fill("contact@qa.example");
+    const settingsAcknowledgment = page.waitForResponse(
+      (response) =>
+        response.url().endsWith(`/schools/${school}/settings`) &&
+        response.request().method() === "PUT",
+    );
     await page
       .getByRole("button", { name: "Save institution defaults", exact: true })
       .click();
+    const acknowledged = await settingsAcknowledgment;
+    expect(acknowledged.request().postDataJSON().academicSession).toBe(
+      "2026–27 QA",
+    );
+    expect(acknowledged.ok(), await acknowledged.text()).toBe(true);
+    expect((await acknowledged.json()).settings.academicSession).toBe(
+      "2026–27 QA",
+    );
     await expect
       .poll(
         async () =>

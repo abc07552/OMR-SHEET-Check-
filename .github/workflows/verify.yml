@@ -196,3 +196,58 @@ jobs:
               message = message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
               print(f"::warning title=Earlier synthetic QA failure {run} part {start // 2800 + 1}::{message}")
           PY
+      - name: Inspect bounded synthetic browser context without exposing session headers
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          DIAGNOSE_RUN: ${{ inputs.diagnose_run }}
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess, tempfile, zipfile
+          from pathlib import Path
+          from urllib.parse import urlsplit
+          run = os.environ["DIAGNOSE_RUN"]
+          # The prior step must pass its same-branch/workflow/failure checks first.
+          artifacts = json.loads(subprocess.check_output([
+              "gh", "api", f"repos/{os.environ['GH_REPO']}/actions/runs/{run}/artifacts"
+          ], text=True))["artifacts"]
+          evidence = [a for a in artifacts if a["name"] == "synthetic-qa-evidence" and not a["expired"]]
+          if len(evidence) != 1 or evidence[0]["size_in_bytes"] > 64 * 1024 * 1024:
+              raise SystemExit("Choose a run with one bounded synthetic QA artifact.")
+          context = []
+          with tempfile.TemporaryDirectory() as directory:
+              subprocess.run(["gh", "run", "download", run, "--name", "synthetic-qa-evidence", "--dir", directory], check=True)
+              for path in Path(directory).rglob("error-context.md"):
+                  context.append(path.read_text()[-6000:])
+              for path in Path(directory).rglob("trace.zip"):
+                  with zipfile.ZipFile(path) as trace:
+                      for member in trace.infolist():
+                          if not member.filename.endswith(".network") or member.file_size > 32 * 1024 * 1024:
+                              continue
+                          for line in trace.read(member).decode().splitlines():
+                              snapshot = json.loads(line).get("snapshot", {})
+                              request = snapshot.get("request", {})
+                              route = urlsplit(request.get("url", "")).path
+                              if not route.endswith("/settings"):
+                                  continue
+                              # Do not print cookies, authorization headers, logos or private object URLs.
+                              item = {"method": request.get("method"), "path": route, "status": snapshot.get("response", {}).get("status")}
+                              body = (request.get("postData") or {}).get("text", "")
+                              if body:
+                                  parsed = json.loads(body)
+                                  item["submitted"] = {k: parsed[k] for k in ("academicSession", "revision") if k in parsed}
+                              content = snapshot.get("response", {}).get("content", {})
+                              resource = "resources/" + content.get("_sha1", "")
+                              if resource in trace.namelist() and trace.getinfo(resource).file_size < 1000000:
+                                  try:
+                                      parsed = json.loads(trace.read(resource))
+                                      item["response"] = {k: parsed[k] for k in ("error", "revision") if k in parsed}
+                                  except (ValueError, TypeError):
+                                      item["response"] = "Non-JSON error response"
+                              context.append(json.dumps(item))
+          tail = "\n".join(context).encode()[-18000:]
+          for start in range(0, len(tail), 2800):
+              message = tail[start:start + 2800].decode("utf-8", errors="replace")
+              message = message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+              print(f"::warning title=Synthetic browser context {run} part {start // 2800 + 1}::{message}")
+          PY

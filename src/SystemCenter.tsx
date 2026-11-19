@@ -1,18 +1,13 @@
-import { useEffect, useState } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
+import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   Activity,
   ArrowDownToLine,
   Cloud,
-  Database,
   HardDrive,
   History,
   LockKeyhole,
   RefreshCw,
-  Save,
   ShieldCheck,
   SunMoon,
   Trash2,
@@ -30,18 +25,7 @@ import {
   vaultEnabled,
 } from "./offline";
 import { OfflineUnlock } from "./AccountAccess";
-import { queryClient } from "./query";
-const settingsSchema = z.object({
-  logo: z.string().max(500000),
-  academicSession: z.string().max(40),
-  contactEmail: z.union([z.email(), z.literal("")]),
-  contactPhone: z.string().max(40),
-  notifications: z.boolean(),
-  defaultNegativeMarks: z.number().min(0).max(100),
-  defaultPassPercentage: z.number().min(1).max(100),
-  theme: z.enum(["dark", "light", "system"]),
-});
-type InstitutionSettings = z.infer<typeof settingsSchema>;
+import InstitutionDefaults from "./InstitutionDefaults";
 import { applyTheme } from "./theme";
 interface Health {
   database: string;
@@ -79,14 +63,6 @@ export default function SystemCenter({
     [unlocking, setUnlocking] = useState(false),
     [enabled, setEnabled] = useState(vaultEnabled(session.user?.id)),
     [theme, setTheme] = useState(localStorage.getItem("omr-theme") || "dark");
-  const settings = useQuery<{
-    settings: Partial<InstitutionSettings>;
-    revision: number;
-  }>({
-    queryKey: ["institution-settings", session.user?.id, school],
-    queryFn: () => api(`/schools/${school}/settings`),
-    enabled: connected && admin,
-  });
   const health = useQuery<Health>({
     queryKey: ["system-health", session.user?.id],
     queryFn: () => api("/system/health"),
@@ -99,40 +75,6 @@ export default function SystemCenter({
     queryKey: ["sync-operations", session.user?.id, school, revision],
     queryFn: () => api(`/schools/${school}/sync/log`),
     enabled: connected,
-  });
-  const form = useForm<InstitutionSettings>({
-    resolver: zodResolver(settingsSchema),
-    defaultValues: {
-      logo: "",
-      academicSession: "",
-      contactEmail: "",
-      contactPhone: "",
-      notifications: true,
-      defaultNegativeMarks: 0,
-      defaultPassPercentage: 40,
-      theme: "dark",
-    },
-  });
-  useEffect(() => {
-    if (settings.data)
-      form.reset({ ...form.getValues(), ...settings.data.settings });
-  }, [settings.data]);
-  const save = useMutation({
-    mutationFn: (values: InstitutionSettings) =>
-      api(`/schools/${school}/settings`, {
-        method: "PUT",
-        body: JSON.stringify({ ...values, revision }),
-      }),
-    onSuccess: async () => {
-      applyTheme(form.getValues("theme"));
-      setTheme(form.getValues("theme"));
-      await reload();
-      await queryClient.invalidateQueries({
-        queryKey: ["institution-settings"],
-      });
-      toast("Institution settings saved with revision protection.");
-    },
-    onError: (e) => toast(e.message),
   });
   const cache = cachedSchool(school);
   return (
@@ -528,130 +470,15 @@ export default function SystemCenter({
         </section>
       </div>
       {admin && connected && (
-        <section className="card institution-settings-card">
-          <div className="card-heading">
-            <div>
-              <h2>
-                <Database size={18} />
-                Institution defaults
-              </h2>
-              <p>
-                New exam defaults, contact details, session and notification
-                preferences.
-              </p>
-            </div>
-          </div>
-          {settings.error && (
-            <p className="form-error">{settings.error.message}</p>
-          )}
-          <form
-            className="form-fields"
-            onSubmit={form.handleSubmit((v) => save.mutate(v))}
-          >
-            <div className="institution-logo-field">
-              <label>
-                Report / institution logo
-                <input
-                  aria-label="Upload institution logo"
-                  type="file"
-                  accept="image/png,image/jpeg,image/webp"
-                  onChange={async (e) => {
-                    const target = e.currentTarget,
-                      file = target.files?.[0];
-                    if (!file) return;
-                    try {
-                      const { normaliseLogo } = await import("./sheetImages");
-                      form.setValue("logo", await normaliseLogo(file), {
-                        shouldDirty: true,
-                      });
-                    } catch (e) {
-                      toast(
-                        e instanceof Error ? e.message : "Logo upload failed.",
-                      );
-                    } finally {
-                      target.value = "";
-                    }
-                  }}
-                />
-              </label>
-              {form.watch("logo") && (
-                <>
-                  <img src={form.watch("logo")} alt="Institution report logo" />
-                  <button
-                    type="button"
-                    className="text-button danger-text"
-                    onClick={() =>
-                      form.setValue("logo", "", { shouldDirty: true })
-                    }
-                  >
-                    Remove logo
-                  </button>
-                </>
-              )}
-            </div>
-            <div className="import-mapping-grid">
-              <label>
-                Academic session
-                <input {...form.register("academicSession")} />
-              </label>
-              <label>
-                Contact email
-                <input type="email" {...form.register("contactEmail")} />
-              </label>
-              <label>
-                Contact phone
-                <input {...form.register("contactPhone")} />
-              </label>
-              <label>
-                Default negative marks
-                <input
-                  type="number"
-                  min={0}
-                  max={100}
-                  step="0.01"
-                  {...form.register("defaultNegativeMarks", {
-                    valueAsNumber: true,
-                  })}
-                />
-              </label>
-              <label>
-                Default pass percentage
-                <input
-                  type="number"
-                  min={1}
-                  max={100}
-                  {...form.register("defaultPassPercentage", {
-                    valueAsNumber: true,
-                  })}
-                />
-              </label>
-              <label>
-                Default color theme
-                <Select {...form.register("theme")}>
-                  <option value="dark">Dark</option>
-                  <option value="light">Light</option>
-                  <option value="system">System</option>
-                </Select>
-              </label>
-            </div>
-            <label className="checkbox-label">
-              <input type="checkbox" {...form.register("notifications")} />
-              Show assessment review notifications
-            </label>
-            {Object.values(form.formState.errors).map((e, i) => (
-              <p className="form-error" key={i}>
-                {e.message}
-              </p>
-            ))}
-            <button
-              className="button button-primary"
-              disabled={save.isPending || status !== "saved"}
-            >
-              <Save size={16} />
-              Save institution defaults
-            </button>
-          </form>
-        </section>
+        <InstitutionDefaults
+          key={JSON.stringify([session.user!.id, school])}
+          actorId={session.user!.id}
+          schoolId={school}
+          status={status}
+          reload={reload}
+          onThemeSaved={setTheme}
+          toast={toast}
+        />
       )}
       {unlocking && (
         <OfflineUnlock

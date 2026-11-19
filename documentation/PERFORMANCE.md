@@ -52,7 +52,7 @@ The larger correctness corpus separately exercises dark/bright/faded/shadowed im
 
 ## Application/build observations
 
-- Production TypeScript/Vite/PWA build passed. At this checkpoint, **51 precache entries / 23,117.02 KiB (about 22.6 MiB)** retain offline CV, OCR and PDF operation.
+- Production TypeScript/Vite/PWA build passed. At this checkpoint, **51 precache entries / 23,118.81 KiB (about 22.6 MiB)** retain offline CV, OCR and PDF operation.
 - Lazy chunks remain large: ExcelJS about **940 kB raw / 271 kB gzip**, PDF about **501 kB / 150 kB**, charts about **465 kB / 129 kB**. The build warning is retained, not hidden by raising its threshold.
 - The expanded genuine browser workflow passed in approximately **48 seconds test time** against a fresh local PostgreSQL schema. It includes first-run setup, imports/accounts, server scanning, corrections, exports, four browser exposure scans, unsafe-grid rejection, privacy, offline reload/PDF/sync and 36 responsive checks. This duration is **test execution time, not page-load latency**.
 - Durable workers now release their database connection/transaction while CV/OCR runs, use attempt-fenced commits, and recheck current authorization. This avoids occupying a pooled connection throughout a long image read; no throughput number is inferred from the implementation.

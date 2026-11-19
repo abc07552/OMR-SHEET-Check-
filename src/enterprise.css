@@ -540,6 +540,16 @@ button:disabled {
 .institution-settings-card {
   margin-top: 22px;
 }
+.institution-settings-fields {
+  min-width: 0;
+  margin: 0;
+  border: 0;
+}
+.institution-settings-card > .small,
+.institution-settings-card > .form-error,
+.institution-settings-card > .text-button {
+  margin-inline: 20px;
+}
 .import-mapping-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

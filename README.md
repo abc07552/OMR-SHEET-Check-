@@ -93,7 +93,7 @@ The verified Node baseline is commit `8b5360f`; the enterprise API checkpoint is
 - `src/session.tsx`, `src/offline.ts`: authentication, encrypted offline authorization, stable operation queues and revision conflicts.
 - `src/Scanner.tsx`, `src/scanEngine.ts`, `src/omr.ts`, `src/geometry.ts`: real browser scans, camera/PDF input and printable geometry.
 - `src/BatchCenter.tsx`, `src/ScanEvidence.tsx`, `src/Students.tsx`: native job application, originals/overlays and atomic human corrections.
-- `src/StudentImport.tsx`, `src/StudentPortal.tsx`, `src/EvaluationCenter.tsx`, `src/SystemCenter.tsx`: imports, private results, scoring policy and operations.
+- `src/StudentImport.tsx`, `src/StudentPortal.tsx`, `src/EvaluationCenter.tsx`, `src/SystemCenter.tsx`, `src/InstitutionDefaults.tsx`: imports, private results, scoring policy, revision-protected preferences and operations.
 - `backend/`: relational API, schemas/migrations, authorization, deterministic scoring, genuine native OMR, encrypted storage and reports.
 - `backend/tests/`, `src/*.test.*`, `server/*.test.mjs`: automated regression suites.
 - `documentation/`: architecture, migration, verification and deployment notes; [THIRD_PARTY.md](THIRD_PARTY.md): component/license information.
