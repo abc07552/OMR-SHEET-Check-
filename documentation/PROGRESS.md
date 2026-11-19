@@ -122,7 +122,13 @@ and print bridges, awaited export failures, and native-versus-hosted PWA guards.
 Local verification: **150 frontend tests / 11 files and 30 preserved Node tests
 passed**, along with TypeScript, formatting and npm audit (0 advisories).
 The production Android web bundle and Capacitor synchronization also passed.
-These checks are executed independently of the native compiler. Native compilation
+These checks are executed independently of the native compiler.
+A first native attempt stopped during Gradle default-configuration evaluation
+and uploaded no APK. Version-code conversion now uses an explicit integer
+assignment. Three failing pipeline/diagnostic regressions were reproduced and
+fixed (four checks now pass): preserve compiler failure through `tee`, retain the
+actual cause before stack frames and bound annotation escaping. Upload also
+requires the native JVM XML to show executed tests with no errors/failures/skips. Native compilation
 requires JDK 21/SDK 36, unavailable in the restricted local sandbox; consult
 **Build Android APK** for the actual exact-commit build outcome and artifact, not
 the earlier web checks. Hardware/emulator acceptance, release signing and hosted

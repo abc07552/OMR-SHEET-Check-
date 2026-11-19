@@ -31,6 +31,10 @@ on:
 permissions:
   contents: read
 
+defaults:
+  run:
+    shell: bash
+
 concurrency:
   group: omr-android-${{ github.ref }}
   cancel-in-progress: true
@@ -75,12 +79,23 @@ jobs:
       - name: Compile APK, run JVM tests and Android lint
         working-directory: android
         run: |
+          set -euo pipefail
           mkdir -p ../.cache/android
           test -x ./gradlew
           ./gradlew --no-daemon --console=plain --stacktrace testDebugUnitTest lintDebug assembleDebug 2>&1 | tee ../.cache/android/gradle.log
       - name: Verify signed APK and stage download
         run: |
           set -euo pipefail
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+          path = Path('android/app/build/test-results/testDebugUnitTest/TEST-com.markly.omrpro.ExportPolicyTest.xml')
+          suite = ET.parse(path).getroot()
+          tests = int(suite.attrib['tests'])
+          assert tests >= 4 and all(int(suite.attrib.get(key, 0)) == 0 for key in ('failures', 'errors', 'skipped')), suite.attrib
+          Path('.cache/android/native-tests.txt').write_text(str(tests))
+          print(f'{tests} native JVM export-policy tests passed with no failures/errors/skips.')
+          PY
           apk=android/app/build/outputs/apk/debug/app-debug.apk
           test -s "$apk"
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose "$apk"
@@ -96,7 +111,10 @@ jobs:
           import fs from 'node:fs';
           const config = JSON.parse(fs.readFileSync('android/app/src/main/assets/capacitor.config.json', 'utf8'));
           const mode = config.server?.url ? `Hosted school app: ${config.server.url}` : 'Device-only demo. No school backend is configured.';
-          const info = `OMR Checker AI Pro — DEBUG TEST BUILD\nCommit: ${process.env.GITHUB_SHA}\nRun: ${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}\nAndroid 7.0 / API 24 or newer; current Android System WebView required.\n${mode}\nPython/PostgreSQL are not embedded. This is not a Play Store release.\nCompilation, JVM tests and lint do not certify physical camera/scanner/device behavior.\nBack up local work before replacing an APK signed by a different debug key.\n`;
+          const nativeTests = fs.readFileSync('.cache/android/native-tests.txt', 'utf8');
+          const digest = fs.readFileSync('.cache/android/apk/SHA256SUMS.txt', 'utf8').split(/\s+/)[0];
+          console.log(`::notice title=Verified Android APK::Commit ${process.env.GITHUB_SHA}; ${nativeTests} JVM tests passed; lint/build/signature/manifest passed; SHA-256 ${digest}; ${mode}`);
+          const info = `OMR Checker AI Pro — DEBUG TEST BUILD\nCommit: ${process.env.GITHUB_SHA}\nRun: ${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}\nNative JVM tests: ${nativeTests} passed; lint/build/signature/manifest verified.\nAndroid 7.0 / API 24 or newer; current Android System WebView required.\n${mode}\nPython/PostgreSQL are not embedded. This is not a Play Store release.\nCompilation, JVM tests and lint do not certify physical camera/scanner/device behavior.\nBack up local work before replacing an APK signed by a different debug key.\n`;
           fs.writeFileSync('.cache/android/apk/BUILD-INFO.txt', info);
           fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `## Android debug APK\n\n${info}\n\nDownload the **omr-checker-android-debug** artifact below.\n`);
           JS
@@ -115,6 +133,7 @@ jobs:
           name: android-qa-reports
           path: |
             android/app/build/reports/tests/testDebugUnitTest/
+            android/app/build/test-results/testDebugUnitTest/*.xml
             android/app/build/reports/lint-results-debug.*
             .cache/android/gradle.log
             .cache/android/apk-manifest.txt
@@ -129,11 +148,20 @@ jobs:
           path = Path('.cache/android/gradle.log')
           if path.exists():
               lines = path.read_text(errors='replace').splitlines()
-              # Only synthetic build diagnostics, never school data or .env files.
-              important = [line for line in lines if any(word in line for word in ('error:', 'What went wrong', 'Execution failed', 'Could not', 'FAILURE:', 'Error:', 'error:'))]
-              tail = ('\n'.join(important[:35] + lines[-35:])).encode()[-14000:]
-              for start in range(0, len(tail), 2800):
-                  message = tail[start:start + 2800].decode(errors='replace')
-                  message = message.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
-                  print(f'::warning title=Android build diagnostics::{message}')
+              # Prefer the actual cause, not the end of a potentially huge stack.
+              contexts = []
+              for index, line in enumerate(lines):
+                  if '* What went wrong:' in line:
+                      contexts.extend(lines[index:index + 14])
+                      break
+              important = [line for line in lines if any(word in line for word in ('error:', 'Execution failed', 'Could not', 'FAILURE:', 'Error:'))]
+              manifest = Path('.cache/android/apk-manifest.txt')
+              extra = manifest.read_text(errors='replace').splitlines()[:25] if manifest.exists() else []
+              message = '\n'.join(contexts + important[:15] + lines[-15:] + extra).encode()[:16000]
+              # 900 raw bytes stay below annotation limits even when every byte
+              # needs percent/newline escaping (3x expansion).
+              for start in range(0, len(message), 900):
+                  part = message[start:start + 900].decode(errors='replace')
+                  part = part.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+                  print(f'::warning title=Android build diagnostics::{part}')
           PY

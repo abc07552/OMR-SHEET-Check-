@@ -151,6 +151,11 @@ configuration, download and physical-device acceptance checklist.
   demo without trying to authenticate against an imaginary `/api`.
 - `src/PWAStatus.test.tsx`: bundled assets avoid stale PWA registration; hosted
   clients retain actual cache readiness and visible registration errors.
+- `backend/tests/test_android_workflow.py`: a failing compiler process cannot be
+  hidden by log capture; successful output is retained; the actual error cause
+  survives long stacks; percent-heavy annotations stay bounded. Three regressions
+  failed before the pipeline/diagnostic fix; all four pass after it. The tiny
+  executable in these tests checks shell plumbing, not Android compilation.
 - Native `ExportPolicyTest`: real JVM filename/MIME/base64 size validation.
   `.github/workflows/main.yml` builds web assets, synchronizes Capacitor, runs
   `testDebugUnitTest lintDebug assembleDebug` inside `android/`, then checks the

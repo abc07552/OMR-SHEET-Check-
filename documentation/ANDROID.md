@@ -82,7 +82,9 @@ checked into Git. `dist-android/` does not overwrite an existing web `dist/`.
    `main` still contains the old build; do not re-run its old failing commit.
 4. A successful job installs locked npm dependencies, runs frontend regressions,
    builds/synchronizes assets, runs native JVM tests and Android lint, then builds
-   a debug APK. It verifies the APK signature, launchable activity and SDK/package
+   a debug APK. Compiler failures propagate through log capture; native JVM XML
+   must confirm executed tests with no errors/failures/skips. The job verifies
+   the APK signature, launchable activity and SDK/package
    metadata **before** uploading.
 5. Download **`omr-checker-android-debug`** from that successful run's **Artifacts**.
    Extract it to obtain `omr-checker-ai-pro-debug.apk`, `SHA256SUMS.txt` and
