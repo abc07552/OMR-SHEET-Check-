@@ -184,10 +184,15 @@ jobs:
           log = subprocess.check_output([
               "gh", "run", "view", run, "--log-failed"
           ], text=True)
-          log = re.sub(r"\x1b\[[0-9;]*m", "", log)
-          # GitHub's original secret masking remains in force. The bounded tail
-          # is useful where signed archive hosts cannot be reached by operators.
-          message = "\n".join(log.splitlines()[-100:])[-24000:]
-          message = message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
-          print(f"::warning title=Earlier synthetic QA failure {run}::{message}")
+          log = re.sub(r"(?:\x1b|\^\[)\[[0-9;]*m", "", log)
+          lines = [re.sub(r"^\ufeff?[0-9-]+T\S+\s?", "", line.split("\t", 2)[-1])
+                   for line in log.splitlines()]
+          # GitHub's original secret masking remains in force. Individual check
+          # annotations truncate at about 4 KiB: compact repeated prefixes and
+          # split the bounded tail rather than losing the actual final error.
+          tail = "\n".join(lines[-100:]).encode("utf-8")[-24000:]
+          for start in range(0, len(tail), 2800):
+              message = tail[start:start + 2800].decode("utf-8", errors="replace")
+              message = message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+              print(f"::warning title=Earlier synthetic QA failure {run} part {start // 2800 + 1}::{message}")
           PY
