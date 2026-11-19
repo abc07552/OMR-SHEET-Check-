@@ -16,11 +16,61 @@ and identity. The historical failed run is not rewritten or deleted.
 
 ## What an APK contains — and what it does not
 
-**Default: device-only demo.** The APK bundles the React app, genuine optical
-engine, OCR assets and offline client. It opens the separate local workspace and
-shows a persistent warning that this is not an authenticated school account.
-There is no pretend sign-in, embedded database server or invented API endpoint.
-**Do not enter private student data in this unencrypted demo workspace.**
+**Default: school-server connection screen.** The APK bundles the React app,
+genuine optical engine, OCR assets and offline client. It now opens **Connect
+your school** instead of silently selecting the local demo. A deployed server
+is still necessary: there is no pretend sign-in, embedded database server or
+invented API endpoint. **Explore the separate device demo** remains available;
+its unencrypted records stay at `https://localhost`, are never copied to a
+school automatically, and must not contain private student information.
+
+### Connect without rebuilding the APK
+
+1. Deploy the **updated** FastAPI backend **and web client** at a trusted HTTPS
+   origin using [DEPLOYMENT.md](DEPLOYMENT.md). GitHub Pages cannot host this API.
+2. In **Connect your school**, enter the whole origin, such as your real
+   `https://omr.school.edu` address, without `/api`, credentials, query or fragment.
+   Use a DNS name (punycode for international names) or non-loopback IPv4 address
+   with a valid certificate. IPv6 literals and ambiguous numeric addresses are
+   not supported by the pairing screen. `localhost` means the phone, not a PC.
+3. Tap **Check server**. A credential-free native HTTPS request to
+   `/api/connection-info` verifies the connection protocol, FastAPI backend,
+   database connectivity and presence of the served web client. Redirects,
+   incompatible/older Node APIs, missing clients and invalid TLS are rejected.
+   Metadata is capped at 8 KiB; connect/read timeouts are 8 seconds, with a bounded
+   total read deadline. Development/SQLite servers are explicitly marked as test
+   systems, not production installations.
+4. Tap **Connect & continue securely** and approve Android's **Trust and connect**
+   prompt only if your institution supplied that exact origin. TLS/compatibility
+   do not identify a school's operator: the trusted host supplies code that can
+   use the app's native bridge. The address is public configuration, not a secret.
+5. The app restarts at that HTTPS origin with relative, same-origin `/api`
+   requests and HttpOnly cookie authentication. Create the first administrator
+   using the hosting operator's setup token, or sign in to an existing account.
+   Open **Team & access → Add team member** for real teacher/student accounts.
+   Production setup fails closed without the configured bootstrap secret.
+
+Only the origin is saved in private Android preferences; no password, bootstrap
+secret, auth token, backup or student record is copied through pairing. Prior
+WebView cookies are cleared on an approved server change so reconnection requires
+fresh sign-in. The server is rechecked before every connect, including after a
+previous successful UI check. The hosted app cannot use the plugin to probe or
+repoint other origins: changing schools starts from the bundled connection screen.
+
+**Recovery / switching:** a native **Connection** bar remains above the hosted
+app, independent of HTML/JavaScript/API availability. Retry a failed load, keep
+an offline view open, or return to the connection screen. Sign out inside the
+app first when possible. Disconnect clears this app's device-side web cookies
+and in-memory keys, but does not delete server records, demo data or encrypted
+IndexedDB queues; reconnect to the original address to recover that queue.
+If sign-out could not reach the server, cookie removal is not remote session
+revocation. Save/export unsaved work before switching. Private data is never
+silently exposed as demo data when a server fails.
+
+The same connection screen is accessible from **Team & access** in demo mode,
+**Settings → Hosting & storage**, the account menu and the sign-in screen. In an
+ordinary browser it opens the school app at its own origin rather than attempting
+an unverified cross-origin credential exchange.
 
 **Hosted school variant:** first deploy the complete web app and FastAPI with
 PostgreSQL at one trusted **HTTPS origin**, following [DEPLOYMENT.md](DEPLOYMENT.md).
@@ -40,8 +90,8 @@ Never put a password, setup token, database URL or API secret in this variable.
 The configured host controls code with access to this app's native bridge.
 
 For GitHub Actions, configure the repository **Actions variable**
-`ANDROID_SERVER_URL` before running the workflow. Leave it unset for the labelled
-demo APK. This variable is a **public URL**, not a credential. It is not provisioned
+`ANDROID_SERVER_URL` before running the workflow. Leave it unset for runtime
+connection setup with the separate optional demo. This variable is a **public URL**, not a credential. It is not provisioned
 by this change. Deploy the updated client too: older web versions lack the native
 export bridge. Initial hosted sign-in needs a reachable deployment; bundled APK
 assets do not automatically provide a second authenticated copy of the hosted

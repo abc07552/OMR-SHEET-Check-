@@ -130,14 +130,73 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 describe("session and conflict-aware offline synchronization", () => {
-  it("opens the bundled Android device-only workspace without pretending a school API exists", async () => {
+  it("starts bundled Android at server onboarding, not a pretend account or an automatic private-data upload", async () => {
     vi.spyOn(native, "isBundledAndroid").mockReturnValue(true);
     const { result } = renderHook(useSession, { wrapper });
-    await waitFor(() => expect(result.current.phase).toBe("local"));
+    await waitFor(() => expect(result.current.phase).toBe("connection"));
     expect(result.current.available).toBe(false);
     expect(result.current.user).toBeNull();
     expect(result.current.warning).toContain("not account-protected");
     expect(fetch).not.toHaveBeenCalled();
+    act(() => result.current.explore());
+    expect(result.current.phase).toBe("local");
+    act(() => result.current.openLogin());
+    expect(result.current.phase).toBe("connection");
+    expect(fetch).not.toHaveBeenCalled();
+  });
+  it("locks private state on native server departure and ignores a late sign-in response", async () => {
+    const { result } = renderHook(useSession, { wrapper });
+    await waitFor(() => expect(result.current.phase).toBe("authenticated"));
+    await act(async () => {
+      await enableVault(
+        user,
+        "s",
+        stored,
+        revision,
+        "independent-offline-passphrase",
+      );
+    });
+    let finish!: (response: Response) => void;
+    const original = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation((input, init) =>
+      String(input).endsWith("/auth/login")
+        ? new Promise((resolve) => {
+            finish = resolve;
+          })
+        : original(input, init),
+    );
+    let login!: Promise<void>;
+    act(() => {
+      login = result.current.login(user.email, "a-valid-password");
+    });
+    await waitFor(() => expect(finish).toBeTypeOf("function"));
+    act(() => window.dispatchEvent(new Event("omr-server-leaving")));
+    expect(result.current.user).toBeNull();
+    expect(result.current.phase).toBe("login");
+    expect(vaultEnabled()).toBe(false);
+    await act(async () => {
+      finish(json({ user }));
+      await login;
+    });
+    expect(result.current.user).toBeNull();
+    expect(result.current.phase).toBe("login");
+  });
+  it("does not restore a private session from a bootstrap request that completes after native departure", async () => {
+    let finish!: (response: Response) => void;
+    const original = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation((input, init) =>
+      String(input).endsWith("/auth/me")
+        ? new Promise((resolve) => {
+            finish = resolve;
+          })
+        : original(input, init),
+    );
+    const { result } = renderHook(useSession, { wrapper });
+    await waitFor(() => expect(finish).toBeTypeOf("function"));
+    act(() => window.dispatchEvent(new Event("omr-server-leaving")));
+    await act(async () => finish(json({ user })));
+    expect(result.current.phase).toBe("login");
+    expect(result.current.user).toBeNull();
   });
   it("never renders a saved badge for a changed workspace before the server acknowledges it", async () => {
     const seen: { teacher: string; status: string }[] = [];

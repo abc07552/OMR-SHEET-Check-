@@ -1,31 +1,18 @@
 import type { CapacitorConfig } from "@capacitor/cli";
+import { normalizeServerOrigin } from "./src/serverOrigin";
 
 /** An optional, trusted deployment of the complete app + same-origin /api. */
 export function androidConfig(
   serverUrl = process.env.OMR_ANDROID_SERVER_URL || "",
 ): CapacitorConfig {
   const value = serverUrl.trim();
-  let url: URL | undefined;
+  let origin: string | undefined;
   if (value) {
     try {
-      url = new URL(value);
-    } catch {
-      throw new Error("OMR_ANDROID_SERVER_URL must be an absolute HTTPS URL.");
-    }
-    const hostname = url.hostname.replace(/\.$/, "");
-    if (
-      url.protocol !== "https:" ||
-      url.username ||
-      url.password ||
-      url.pathname !== "/" ||
-      url.search ||
-      url.hash ||
-      ["localhost", "127.0.0.1", "[::1]"].includes(hostname) ||
-      hostname.endsWith(".localhost") ||
-      hostname.includes("*")
-    ) {
+      origin = normalizeServerOrigin(value);
+    } catch (error) {
       throw new Error(
-        "OMR_ANDROID_SERVER_URL must be a trusted HTTPS origin, without credentials, a path, query or fragment; not localhost.",
+        `OMR_ANDROID_SERVER_URL: ${error instanceof Error ? error.message : "Use a trusted HTTPS origin."}`,
       );
     }
   }
@@ -39,7 +26,7 @@ export function androidConfig(
       hostname: "localhost",
       androidScheme: "https",
       cleartext: false,
-      ...(url ? { url: url.origin } : {}),
+      ...(origin ? { url: origin } : {}),
       // Other origins open outside the privileged application WebView.
       allowNavigation: [],
     },

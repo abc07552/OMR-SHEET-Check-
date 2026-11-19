@@ -22,7 +22,7 @@ import {
 } from "./offline";
 import type { PendingOperation } from "./offline";
 import { queryClient } from "./query";
-import { isBundledAndroid } from "./native";
+import { isAndroid, isBundledAndroid } from "./native";
 
 export interface Membership {
   schoolId: string;
@@ -41,7 +41,11 @@ export interface AuthUser {
   role?: string;
   memberships: Membership[];
 }
-const configured = import.meta.env.VITE_API_BASE?.replace(/\/$/, "");
+// Native school deployments always load the complete app + /api at one origin.
+// A web build's optional API override must never turn into cross-origin native auth.
+const configured = isAndroid()
+  ? undefined
+  : import.meta.env.VITE_API_BASE?.replace(/\/$/, "");
 export const API_BASE = configured || "/api";
 export class APIError extends Error {
   constructor(
@@ -98,7 +102,11 @@ export async function apiDownload(path: string, filename: string) {
   await downloadFile(filename, await response.blob());
 }
 interface Session {
-  phase: "checking" | "login" | "setup" | "local" | "authenticated";
+  phase:
+    "checking" | "connection" | "login" | "setup" | "local" | "authenticated";
+  connectionOpen: boolean;
+  openConnection: () => void;
+  closeConnection: () => void;
   available: boolean;
   backend: "fastapi" | "node" | "";
   offline: boolean;
@@ -120,6 +128,7 @@ interface Session {
 const SessionContext = createContext<Session | null>(null);
 export function SessionProvider({ children }: { children: ReactNode }) {
   const [phase, setPhase] = useState<Session["phase"]>("checking"),
+    [connectionOpen, setConnectionOpen] = useState(false),
     [available, setAvailable] = useState(false),
     [backend, setBackend] = useState<Session["backend"]>(""),
     [offline, setOffline] = useState(!navigator.onLine),
@@ -135,13 +144,15 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   currentUser.current = user;
   useEffect(() => {
     if (isBundledAndroid()) {
-      setPhase("local");
+      setPhase("connection");
       setWarning(
         "Android device-only demo: no school server is configured. This workspace is not account-protected; do not enter private student data here.",
       );
       return;
     }
     let alive = true;
+    const bootEpoch = authEpoch.current;
+    const isCurrent = () => alive && authEpoch.current === bootEpoch;
     const controller = new AbortController(),
       timeout = setTimeout(() => controller.abort(), 8000);
     void (async () => {
@@ -153,8 +164,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           { signal: controller.signal },
         );
         if (health.service !== "markly-api") throw new Error("No API");
-        if (!alive) return;
+        if (!isCurrent()) return;
         await revokeDeferred();
+        if (!isCurrent()) return;
         setAvailable(true);
         setOffline(false);
         setBackend(health.backend === "fastapi" ? "fastapi" : "node");
@@ -163,7 +175,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           setupAllowed: boolean;
           tokenRequired: boolean;
         }>("/setup/status", { signal: controller.signal });
-        if (!alive) return;
+        if (!isCurrent()) return;
         setTokenRequired(status.tokenRequired);
         setNeedsSetup(status.needsSetup);
         if (sessionStorage.getItem("markly-offline") === "1") {
@@ -178,18 +190,18 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           const data = await api<{ user: AuthUser }>("/auth/me", {
             signal: controller.signal,
           });
-          if (!alive) return;
+          if (!isCurrent()) return;
           setUser(data.user);
           setSchool(data.user.memberships[0]?.schoolId || "");
           setPhase("authenticated");
         } catch (e) {
-          if (alive) {
+          if (isCurrent()) {
             setPhase("login");
             if (!(e instanceof APIError)) setOffline(true);
           }
         }
       } catch {
-        if (alive) {
+        if (isCurrent()) {
           setOffline(true);
           setPhase(location.hostname.endsWith("github.io") ? "local" : "login");
         }
@@ -337,8 +349,22 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       window.removeEventListener("omr-session-expired", expired);
     };
   }, [user?.id, offline, reconnect]);
+  useEffect(() => {
+    const leaving = () => {
+      authEpoch.current++;
+      lockVault();
+      queryClient.clear();
+      setUser(null);
+      setPhase("login");
+    };
+    window.addEventListener("omr-server-leaving", leaving);
+    return () => window.removeEventListener("omr-server-leaving", leaving);
+  }, []);
   const value: Session = {
     phase,
+    connectionOpen,
+    openConnection: () => setConnectionOpen(true),
+    closeConnection: () => setConnectionOpen(false),
     available,
     backend,
     offline,
@@ -374,6 +400,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       }
     },
     explore: () => {
+      setConnectionOpen(false);
       authEpoch.current++;
       lockVault();
       queryClient.clear();
@@ -382,11 +409,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       setPhase("local");
     },
     openLogin: () => {
+      setConnectionOpen(false);
       authEpoch.current++;
       lockVault();
       queryClient.clear();
       sessionStorage.removeItem("markly-offline");
-      setPhase(needsSetup ? "setup" : "login");
+      setPhase(
+        isBundledAndroid() ? "connection" : needsSetup ? "setup" : "login",
+      );
     },
     reloadUser: reconnect,
     unlockOffline: async (email, passphrase) => {

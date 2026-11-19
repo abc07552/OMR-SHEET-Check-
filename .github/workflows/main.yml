@@ -46,7 +46,7 @@ jobs:
     timeout-minutes: 35
     env:
       # Optional PUBLIC origin of the complete HTTPS app + same-origin /api.
-      # Empty means an explicitly labelled device-only demo, not fake sign-in.
+      # Empty opens runtime HTTPS server onboarding; the separate demo is optional.
       OMR_ANDROID_SERVER_URL: ${{ vars.ANDROID_SERVER_URL }}
       OMR_ANDROID_VERSION_CODE: ${{ github.run_number }}
     steps:
@@ -89,12 +89,16 @@ jobs:
           python3 - <<'PY'
           import xml.etree.ElementTree as ET
           from pathlib import Path
-          path = Path('android/app/build/test-results/testDebugUnitTest/TEST-com.markly.omrpro.ExportPolicyTest.xml')
-          suite = ET.parse(path).getroot()
-          tests = int(suite.attrib['tests'])
-          assert tests >= 4 and all(int(suite.attrib.get(key, 0)) == 0 for key in ('failures', 'errors', 'skipped')), suite.attrib
+          directory = Path('android/app/build/test-results/testDebugUnitTest')
+          required = {'ExportPolicyTest': 4, 'SchoolServerPolicyTest': 6}
+          tests = 0
+          for name, minimum in required.items():
+              suite = ET.parse(directory / f'TEST-com.markly.omrpro.{name}.xml').getroot()
+              count = int(suite.attrib['tests'])
+              assert count >= minimum and all(int(suite.attrib.get(key, 0)) == 0 for key in ('failures', 'errors', 'skipped')), suite.attrib
+              tests += count
           Path('.cache/android/native-tests.txt').write_text(str(tests))
-          print(f'{tests} native JVM export-policy tests passed with no failures/errors/skips.')
+          print(f'{tests} native JVM export/server-policy tests passed with no failures/errors/skips.')
           PY
           apk=android/app/build/outputs/apk/debug/app-debug.apk
           test -s "$apk"
@@ -110,7 +114,7 @@ jobs:
           node --input-type=module <<'JS'
           import fs from 'node:fs';
           const config = JSON.parse(fs.readFileSync('android/app/src/main/assets/capacitor.config.json', 'utf8'));
-          const mode = config.server?.url ? `Hosted school app: ${config.server.url}` : 'Device-only demo. No school backend is configured.';
+          const mode = config.server?.url ? `Hosted school app: ${config.server.url}` : 'Runtime HTTPS school-server setup with a separate optional device demo. A deployed FastAPI server is required for accounts.';
           const nativeTests = fs.readFileSync('.cache/android/native-tests.txt', 'utf8');
           const digest = fs.readFileSync('.cache/android/apk/SHA256SUMS.txt', 'utf8').split(/\s+/)[0];
           console.log(`::notice title=Verified Android APK::Commit ${process.env.GITHUB_SHA}; ${nativeTests} JVM tests passed; lint/build/signature/manifest passed; SHA-256 ${digest}; ${mode}`);

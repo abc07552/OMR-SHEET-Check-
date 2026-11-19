@@ -1,6 +1,6 @@
 # Implementation and verification ledger
 
-This ledger distinguishes implemented/tested work from the full target specification. It is not production certification or a claim that all bugs are fixed. The active review checkpoint is [draft PR #1](https://github.com/abc07552/OMR-SHEET-Check-/pull/1); the existing Markly application/data are preserved.
+This ledger distinguishes implemented/tested work from the full target specification. It is not production certification or a claim that all bugs are fixed. The original integration [PR #1](https://github.com/abc07552/OMR-SHEET-Check-/pull/1) was merged into `main` at `b3d94f3`; subsequent work continues on the current Arena branch. The existing Markly application/data are preserved.
 
 ## Preserved checkpoints
 
@@ -138,3 +138,67 @@ in [ANDROID.md](ANDROID.md), with test contracts in [TESTING.md](TESTING.md).
 Until this branch is merged, the default branch still has the old build steps.
 Re-enabling a workflow does not rewrite that old revision; run the fixed branch
 in Actions and review this same existing draft PR before changing `main`.
+
+## Runtime Android → FastAPI school system — 2026-11-17
+
+The installed APK's unavailable Team & access was caused by the intentional
+bundled-Android local-demo short circuit, not by an absent FastAPI implementation.
+The new connection workflow reuses actual setup, Argon2id accounts, HttpOnly
+sessions, memberships and protected team APIs; it does not invent local logins
+or remove authorization.
+
+Implemented on `arena/c130af42-omr-sheet-check` after merged main `b3d94f3`:
+
+- Bundled startup now presents **Connect your school**, with an explicit separate
+  demo action. Connection entry points also exist in account/sign-in, settings
+  and demo Team & access views.
+- Native credential-free, bounded HTTPS `/api/connection-info` probing, strict
+  origin/protocol/client/database checks, fresh validation on connect, and an
+  explicit native trust prompt. Only the public origin is remembered. Development
+  SQLite is labelled test-only; no wildcard CORS or certificate bypass is added.
+- Whole-app navigation to the selected trusted HTTPS origin retains relative
+  `/api`, real first-admin/bootstrap/sign-in, cookie security and backend RBAC.
+  Android ignores a web build's alternate API override. Demo records never
+  automatically enter the server or the private workspace.
+- Native Connection bar/recovery dialogs work without JavaScript or server
+  availability. Disconnect clears device web sessions and locks private views;
+  server records and encrypted IndexedDB queues stay at their original origin.
+  Offline cookie removal is not claimed as remote session revocation.
+- A regression reproduced a late bootstrap response restoring a private session
+  after departure. Initial discovery now uses the same authorization-epoch fence
+  as later sign-in/revalidation. Both late-bootstrap and late-login tests pass.
+- Public discovery metadata performs a real database query, advertises only a
+  mounted/present client, is no-store and reveals no credentials. Unauthenticated
+  metadata does not permit private workspaces or team administration.
+
+Executed locally for this feature:
+
+| Check                                      | Observed result                                                                                                                                                                          |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Full frontend + preserved Node regressions | **215 frontend / 13 files + 30 Node passed**                                                                                                                                             |
+| Full Python suite                          | **159 passed**, SQLite + isolated real PostgreSQL 16.2 QA schemas                                                                                                                        |
+| Targeted discovery/auth/deployment tests   | **28 passed** before adding the two final unavailable-DB/unmounted-client cases; those final cases passed in the full 159-test run                                                       |
+| Production build                           | Passed; 51 static precache entries, 23,143.86 KiB; existing large-chunk warnings retained                                                                                                |
+| Production browser workflow                | **1 passed, 43.6 s**, current Chromium 153, real PostgreSQL schema; setup/team/restricted portals/native OpenCV/reports/encrypted offline flow retained; exact disposable schema cleaned |
+| Android asset synchronization              | Passed, separate `dist-android`; no native SDK/compiler installed locally                                                                                                                |
+| Formatting / TypeScript / Ruff             | Passed; 42 Python files checked/formatted                                                                                                                                                |
+| npm + runtime/dev Python advisory scans    | No known vulnerabilities reported; `pip check` and Bandit also passed                                                                                                                    |
+
+The fresh sandbox initially lacked browser NSS/NSPR libraries. After extracting
+the QA-only bundled libraries, an older Chromium 143 reached the existing offline
+PDF stage but did not complete intake. The test was rerun with the current
+Chromium 153 and passed, without weakening web security or changing OMR/PDF
+behavior. These QA browser binaries/libraries and test traces remain ignored.
+
+A real FastAPI **development** preview also serves the built web client on port
+8000 with its own `.data/school-preview` SQLite database and fresh administrator
+setup. It is separate from QA schemas and any retained Markly database. This is
+a temporary sandbox preview, **not permanent production hosting or permission to
+enter real student records**. Production still needs an institution-controlled
+host/domain, PostgreSQL, persistent encrypted storage, secrets and operations.
+
+Native compiler/JVM/lint/APK results for the feature are verified separately in
+GitHub Actions before delivering a new artifact; no local native build or
+physical-device acceptance is claimed. External hosting/S3/SMTP and real device
+pairing/camera/lifecycle/upgrade/printed-sheet acceptance remain unprovisioned or
+unexecuted. See ANDROID.md and TESTING.md for operator/device checks.

@@ -36,12 +36,16 @@ Production requires `APP_ENV=production`, a PostgreSQL `DATABASE_URL`, a stable 
 
 A native Capacitor project and **Build Android APK** workflow are included. The
 build uses **JDK 21 / Android SDK 36**, compiles in `android/`, runs native JVM tests
-and lint, and uploads a verified **debug** APK with a checksum. The default APK is
-an explicitly labelled **device-only demo**, not an embedded Python/PostgreSQL
-server or school sign-in. A hosted school variant requires your deployed HTTPS
-web app and same-origin API. See [Android build, download, configuration and device
-testing](documentation/ANDROID.md). Compilation is not physical-device acceptance
-or a Play Store release.
+and lint, and uploads a verified **debug** APK with a checksum. The default APK now
+opens **Connect your school**: enter a deployed HTTPS school origin, check the
+FastAPI system, approve the native trust prompt, then create the first
+administrator or sign in. **Team & access** uses real server accounts and roles.
+The address is remembered; a native **Connection** button supports recovery even
+if the server is down. The optional, unprotected device demo stays separate and
+is never uploaded automatically. No rebuild is needed to choose a school server.
+Python/PostgreSQL are not embedded or provisioned. See [Android build, connection,
+download and device testing](documentation/ANDROID.md). Compilation is not
+physical-device acceptance or a Play Store release.
 
 ```sh
 npm ci

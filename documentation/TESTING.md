@@ -167,3 +167,42 @@ the successful Actions run's exact commit and downloadable artifact as native
 build evidence. `connectedDebugAndroidTest` and hardware camera/file-picker/print/
 hosted-cookie acceptance require an actual device or emulator and are not counted
 as passing simply because a workflow file or instrumented test exists.
+
+## Android runtime FastAPI connection
+
+The default APK now starts at **Connect your school**; demo exploration is an
+explicit separate action. Regressions include `src/serverConnection.test.ts`,
+`src/ServerConnection.test.tsx`, `src/session.test.tsx`,
+`backend/tests/test_connection.py` and `SchoolServerPolicyTest.java`.
+
+- Origin validation rejects credentials, HTTP, API paths, queries/fragments,
+  loopback, ambiguous numeric hosts, control characters and overlong input.
+- The credential-free native probe checks a versioned connection contract,
+  same-origin client availability and actual database connectivity. No TLS bypass,
+  redirects, cross-origin cookie proxy or unbounded metadata allocation is used.
+- Component tests cover explicit check/approval, invalidating stale UI checks,
+  network/certificate/cancellation errors, development/SQLite warnings, delayed
+  preference lookup, demo separation and disconnect controls. Their native bridge
+  doubles exercise UI behavior only, **not a real Android device or TLS stack**.
+- Real SQLite/PostgreSQL API tests cover public metadata/no secrets/no CORS
+  widening, absent/unmounted client, unavailable database, and actual first-admin
+  setup, logout, sign-in and protected team access after discovery.
+- The production Playwright workflow additionally verifies real discovery and
+  the browser connection modal before real admin setup. Its full existing
+  restricted-teacher/student, native OpenCV, reports and encrypted offline
+  workflow must still pass.
+- Two hook regressions cover private-vault locking and late login/bootstrap
+  responses after native departure. The bootstrap case reproduced a private
+  session being restored after departure before the epoch checks were added.
+- Android CI requires **both** real JVM XML suites: at least four export-policy
+  cases and six server-policy cases, with no failures/errors/skips. A separate
+  synthetic-XML Python test verifies missing/failed/skipped native suites cannot
+  pass the artifact gate; synthetic XML is never counted as native execution.
+
+On representative devices, still test: valid production HTTPS pairing with
+first-admin bootstrap and later sign-in; wrong/older/API-only hosts; invalid TLS,
+redirects, slow/oversized responses and cancelled trust; process restart and
+remembered origin; server/DNS/JavaScript failure with native Connection recovery;
+logout and cookie clearing; pending encrypted queue recovery at its original
+origin; independent schools/demo; camera/chooser/exports and APK upgrade. Do not
+claim these physical checks from compilation, mocked UI tests or JVM policy tests.

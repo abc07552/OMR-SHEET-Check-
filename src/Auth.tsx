@@ -12,6 +12,7 @@ import {
 import { Logo } from "./components";
 import { useSession } from "./session";
 import { OfflineUnlock, RecoveryRequest } from "./AccountAccess";
+import { isAndroid } from "./native";
 export default function Auth() {
   const session = useSession(),
     setup = session.phase === "setup";
@@ -112,6 +113,9 @@ export default function Auth() {
               {setup
                 ? "Create the first school and administrator. No default passwords, no shared accounts."
                 : "Sign in to your school’s shared workspace."}
+            </p>
+            <p className="server-origin" aria-label="Current school server">
+              <ShieldCheck size={14} /> {location.origin}
             </p>
             {session.warning && (
               <p className="v2-notice warning" role="alert">
@@ -220,6 +224,15 @@ export default function Auth() {
                 Unlock offline workspace
               </button>
             </div>
+            <button
+              type="button"
+              className="text-button server-demo-link"
+              onClick={session.openConnection}
+            >
+              {isAndroid()
+                ? "School server connection"
+                : "Open another school server"}
+            </button>
             <div className="auth-divider">
               <span>or take a look around</span>
             </div>

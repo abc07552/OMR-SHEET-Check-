@@ -69,6 +69,7 @@ import AnswerKeys, { NewExamModal } from "./AnswerKeys";
 import { StudentDetail } from "./Students";
 import PrintReport from "./PrintReport";
 import ResetAccount from "./AccountAccess";
+import ServerConnection from "./ServerConnection";
 const Scanner = lazy(() => import("./Scanner")),
   Roster = lazy(() => import("./Roster")),
   Analytics = lazy(() => import("./Analytics")),
@@ -112,6 +113,15 @@ const hashPage = (): Page =>
   pages.find((p) => p.id === location.hash.replace(/^#\/?/, "").split("?")[0])
     ?.id || "overview";
 export default function App() {
+  const session = useSession();
+  return (
+    <>
+      <AppContent />
+      {session.connectionOpen && <ServerConnection />}
+    </>
+  );
+}
+function AppContent() {
   const session = useSession(),
     route = useLocation();
   if (route.pathname === "/reset")
@@ -132,6 +142,7 @@ export default function App() {
         <p>Finding a little more possibility…</p>
       </div>
     );
+  if (session.phase === "connection") return <ServerConnection standalone />;
   if (session.phase === "login" || session.phase === "setup") return <Auth />;
   if (session.phase === "authenticated" && !session.user?.memberships.length)
     return (
@@ -821,7 +832,15 @@ function WorkspaceApp() {
                         Secure school sign-in
                       </button>
                     ) : (
-                      <small>Accounts require the FastAPI backend.</small>
+                      <button onClick={session.openConnection}>
+                        <Cloud size={15} />
+                        Connect school server
+                      </button>
+                    )}
+                    {cloud && (
+                      <button onClick={session.openConnection}>
+                        <Cloud size={15} /> School server connection
+                      </button>
                     )}
                   </div>
                 )}

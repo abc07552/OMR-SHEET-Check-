@@ -70,7 +70,32 @@ test("genuine enterprise workflows, restricted portals, reports and encrypted of
       (await api(page.request, "/setup/status")).needsSetup,
       "Use a FRESH disposable database; this suite never resets an existing institution.",
     ).toBe(true);
+    const connection = await api(page.request, "/connection-info");
+    expect(connection).toMatchObject({
+      service: "markly-api",
+      backend: "fastapi",
+      connectionVersion: 1,
+      apiVersion: 3,
+      authentication: "http-only-cookie",
+      clientReady: true,
+      deploymentMode: "development",
+    });
+    expect(["postgresql", "sqlite"]).toContain(connection.database);
+    expect((await page.request.get("/api/auth/me")).status()).toBe(401);
     await page.goto("/");
+    await page
+      .getByRole("button", { name: "Open another school server" })
+      .click();
+    await expect(
+      page.getByRole("dialog", { name: "School server connection" }),
+    ).toBeVisible();
+    await expect(page.getByLabel("School server address")).toBeVisible();
+    await page
+      .getByRole("button", { name: "Close dialog", exact: true })
+      .click();
+    await expect(page.getByLabel("Current school server")).toContainText(
+      new URL(page.url()).origin,
+    );
     await page
       .getByLabel("Your name", { exact: true })
       .fill("QA Administrator");

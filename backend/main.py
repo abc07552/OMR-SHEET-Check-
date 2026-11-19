@@ -66,6 +66,7 @@ class BodyLimitMiddleware:
 
 def create_app(settings: Settings | None = None):
     settings = settings or Settings()
+    frontend_mounted = settings.static_dir.is_dir()
     engine = engine_for(settings)
     try:
         if settings.auto_migrate:
@@ -202,6 +203,22 @@ def create_app(settings: Settings | None = None):
             ],
         }
 
+    @app.get("/api/connection-info")
+    def connection_info():
+        """Credential-free Android onboarding; never grants access or returns secrets."""
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+        return {
+            "service": "markly-api",
+            "backend": "fastapi",
+            "connectionVersion": 1,
+            "apiVersion": 3,
+            "authentication": "http-only-cookie",
+            "deploymentMode": "production" if settings.production else "development",
+            "database": engine.dialect.name,
+            "clientReady": frontend_mounted and (settings.static_dir / "index.html").is_file(),
+        }
+
     @app.get("/api/system/health")
     def system_health(request: Request, user=Depends(current_user)):
         if not user.super_admin:
@@ -232,7 +249,7 @@ def create_app(settings: Settings | None = None):
     def unknown_api(path: str):
         raise HTTPException(404, "API endpoint not found.")
 
-    if settings.static_dir.exists():
+    if frontend_mounted:
         # StaticFiles safely rejects path traversal. The SPA is the final fallback only.
         assets = settings.static_dir / "assets"
         if assets.exists():

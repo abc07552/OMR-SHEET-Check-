@@ -29,5 +29,5 @@ run(process.execPath, [
 console.log(
   process.env.OMR_ANDROID_SERVER_URL?.trim()
     ? "Android synchronized: trusted HTTPS school deployment. The server is NOT included in the APK."
-    : "Android synchronized: device-only demo. No school server or account authentication is included.",
+    : "Android synchronized: HTTPS school-server connection screen + separate device demo. Connect to a deployed FastAPI system for real accounts; the server is not inside the APK.",
 );

@@ -75,3 +75,26 @@ def test_android_failure_annotation_bounds_percent_heavy_logs(tmp_path, monkeypa
     assert all(len(line.encode()) < 4096 for line in lines)
     combined = "".join(unquote(line.split("::", 2)[-1]) for line in lines)
     assert "%" * 100 in combined
+
+
+def test_android_gate_requires_executed_server_and_export_policy_suites(tmp_path, monkeypatch):
+    """Synthetic XML exercises CI gating, not a claimed execution of native tests."""
+    import pytest
+
+    monkeypatch.chdir(tmp_path)
+    directory = tmp_path / "android/app/build/test-results/testDebugUnitTest"
+    directory.mkdir(parents=True)
+    (tmp_path / ".cache/android").mkdir(parents=True)
+    export = directory / "TEST-com.markly.omrpro.ExportPolicyTest.xml"
+    server = directory / "TEST-com.markly.omrpro.SchoolServerPolicyTest.xml"
+    export.write_text('<testsuite tests="4" errors="0" failures="0" skipped="0"/>')
+    script = workflow_step("Verify signed APK")["run"].split("<<'PY'\n", 1)[1].split("\nPY", 1)[0]
+    with pytest.raises(FileNotFoundError):
+        exec(compile(script, "synthetic-native-xml-gate", "exec"), {})
+    for invalid in ('tests="0"', 'tests="6" failures="1"', 'tests="6" errors="1"', 'tests="6" skipped="1"'):
+        server.write_text(f"<testsuite {invalid}/>")
+        with pytest.raises(AssertionError):
+            exec(compile(script, "synthetic-native-xml-gate", "exec"), {})
+    server.write_text('<testsuite tests="6" errors="0" failures="0" skipped="0"/>')
+    exec(compile(script, "synthetic-native-xml-gate", "exec"), {})
+    assert (tmp_path / ".cache/android/native-tests.txt").read_text() == "10"

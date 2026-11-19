@@ -8,9 +8,11 @@ The default `Dockerfile` now builds the React application and a non-root CPython
 
 The optional native project and `Build Android APK` workflow are documented in
 [ANDROID.md](ANDROID.md). They do not package Python/PostgreSQL or provision this
-deployment. The default APK is a labelled device-only demo. For school accounts,
-deploy the complete updated client + `/api` on this guide's same HTTPS origin,
-then set the public Android build origin. Do not weaken cookies/CORS or embed
+deployment. The default APK opens school-server onboarding with a separate
+optional device demo. For school accounts, deploy the complete updated client +
+`/api` on this guide's same HTTPS origin, then enter that address in the APK's
+**Connect your school** screen. The optional public Android build origin can
+still preconfigure a school. Do not weaken cookies/CORS or embed
 server secrets to work around a missing deployment. Debug APKs are test builds,
 not a production mobile release or physical-device certification.
 
@@ -68,6 +70,32 @@ Open your real `https://` domain, complete first-admin setup with the bootstrap 
 The `migrate` service is an explicitly invoked maintenance profile, not a concurrent replica or a continuously restarting process. Do not run concurrent production migrations. The runtime does not automatically apply migrations under this Compose configuration.
 
 **Never run `docker compose down --volumes` or delete a database/data volume on a real installation.** Such commands are suitable only for explicitly disposable CI environments. Changing PostgreSQL password environment values after initial volume creation does not rotate existing database credentials; perform an intentional database-role/password rotation and update clients together.
+
+### Pair Android clients with the real system
+
+After deployment, check your real origin's `/api/connection-info`: it should return
+`service: markly-api`, `backend: fastapi`, `connectionVersion: 1`, `apiVersion: 3`,
+`authentication: http-only-cookie`, `deploymentMode: production`,
+`database: postgresql`, and `clientReady: true`. This small public endpoint performs
+a real database query and checks the served client is present; it does not create
+an account, expose secrets or authorize private data. An API-only deployment must
+build/install `dist` and restart the server before pairing. Existing protected
+health/account endpoints retain their permissions and no-store policies.
+
+On each phone, choose **Connect your school**, enter the exact HTTPS origin,
+**Check server**, then **Connect & continue securely** and approve the native
+trust prompt. First-run setup uses the existing server `SETUP_TOKEN`; subsequent
+users sign in with accounts provisioned under **Team & access**. You do not need
+to rebuild an APK for each school. Alternatively, preconfigure the public
+`ANDROID_SERVER_URL` build variable. Do not enter that variable or any `VITE_*`
+value as a place to store secrets.
+
+Pairing loads the full hosted client with same-origin `/api`, not the bundled
+client making cross-origin cookie requests. There is no wildcard CORS change,
+TLS bypass, token URL or automatic transfer of demo data. Old backend versions
+without `/api/connection-info` are rejected until upgraded. Use the native
+**Connection** bar to retry/recover when a school's server is unreachable. Consult
+[ANDROID.md](ANDROID.md) for cookie clearing, offline queues and device tests.
 
 ### HTTPS, proxy trust and ports
 

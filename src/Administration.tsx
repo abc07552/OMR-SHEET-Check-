@@ -104,6 +104,25 @@ export default function Administration({
                 : "Secure accounts require the FastAPI backend. The separate device demo does not offer pretend authentication."
             }
           />
+          {session.phase !== "authenticated" && (
+            <div className="server-access-action">
+              <button
+                className="button button-primary"
+                onClick={
+                  session.available ? session.openLogin : session.openConnection
+                }
+              >
+                <ShieldCheck size={16} />
+                {session.available
+                  ? "Secure school sign-in"
+                  : "Connect school server"}
+              </button>
+              <p className="small muted">
+                Use a real administrator account to manage your team.
+                Device-demo records are never uploaded automatically.
+              </p>
+            </div>
+          )}
         </section>
       ) : (
         <>

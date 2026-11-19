@@ -419,13 +419,16 @@ export default function Settings({
                 are included in the repository README. No paid hosting or
                 external storage has been provisioned automatically.
               </p>
+              <button
+                className="button button-secondary"
+                onClick={session.openConnection}
+              >
+                {cloud ? "School server connection" : "Connect school server"}
+                <ArrowRight size={15} />
+              </button>
               {!cloud && session.available && (
-                <button
-                  className="button button-secondary"
-                  onClick={session.openLogin}
-                >
-                  Connect to shared workspace
-                  <ArrowRight size={15} />
+                <button className="text-button" onClick={session.openLogin}>
+                  Sign in to this server
                 </button>
               )}
             </div>
