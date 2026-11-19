@@ -149,11 +149,23 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
+          import xml.etree.ElementTree as ET
+          native_failures = []
+          for report in sorted(Path('android/app/build/test-results/testDebugUnitTest').glob('TEST-*.xml')):
+              try:
+                  suite = ET.parse(report).getroot()
+                  for case in suite.iter('testcase'):
+                      for failure in list(case):
+                          if failure.tag in ('failure', 'error', 'skipped') and len(native_failures) < 8:
+                              name = case.attrib.get('classname', '') + '.' + case.attrib.get('name', '')
+                              native_failures.append(name + ': ' + (failure.attrib.get('message', '') + ' ' + ''.join(failure.itertext()))[:2000])
+              except ET.ParseError:
+                  native_failures.append('Invalid native JUnit XML: ' + report.name)
           path = Path('.cache/android/gradle.log')
           if path.exists():
               lines = path.read_text(errors='replace').splitlines()
-              # Prefer the actual cause, not the end of a potentially huge stack.
-              contexts = []
+              # Prefer named JUnit failures and the actual cause, not a huge stack's end.
+              contexts = native_failures[:8]
               for index, line in enumerate(lines):
                   if '* What went wrong:' in line:
                       contexts.extend(lines[index:index + 14])

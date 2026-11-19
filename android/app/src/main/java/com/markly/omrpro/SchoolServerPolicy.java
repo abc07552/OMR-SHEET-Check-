@@ -18,7 +18,11 @@ final class SchoolServerPolicy {
     private SchoolServerPolicy() {}
 
     static String normalize(String input) {
-        if (input == null || input.length() > 2048) throw new IllegalArgumentException(ADDRESS_ERROR);
+        // String.trim() removes trailing NUL/control bytes too. Reject them BEFORE
+        // trimming the harmless surrounding ASCII spaces accepted by the UI.
+        if (input == null || input.length() > 2048 || input.chars().anyMatch(c -> c < 0x20 || c >= 0x7f)) {
+            throw new IllegalArgumentException(ADDRESS_ERROR);
+        }
         String value = input.trim();
         if (value.isEmpty() || value.chars().anyMatch(c -> c <= 0x20 || c >= 0x7f) || value.contains("\\") || value.contains("@")) {
             throw new IllegalArgumentException(ADDRESS_ERROR);

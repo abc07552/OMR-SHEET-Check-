@@ -18,7 +18,7 @@ public class SchoolServerPolicyTest {
 
     @Test
     public void rejectsCredentialsPathsQueriesFragmentsAndOtherSchemes() {
-        for (String value : new String[] { null, "", "school.example", "http://school.example", "file:///a", "javascript:alert(1)", "https://user:secret@school.example", "https://@school.example", "https://school.example/api", "https://school.example/?", "https://school.example/#", "https://school.example?token=private", "https://school.example\\", "https://school.example:0", "https://school.example:65536", "https://school.example/\napi", "https://school.example/\u0000", "https://*.example", "https://éxample.edu", "x".repeat(2049) }) {
+        for (String value : new String[] { null, "", "school.example", "http://school.example", "file:///a", "javascript:alert(1)", "https://user:secret@school.example", "https://@school.example", "https://school.example/api", "https://school.example/?", "https://school.example/#", "https://school.example?token=private", "https://school.example\\", "https://school.example:0", "https://school.example:65536", "https://school.example/\napi", "https://school.example/\u0000", "\u0000https://school.example/", "\nhttps://school.example", "https://school.example\n", "https://*.example", "https://éxample.edu", "x".repeat(2049) }) {
             assertThrows(String.valueOf(value), IllegalArgumentException.class, () -> SchoolServerPolicy.normalize(value));
         }
     }

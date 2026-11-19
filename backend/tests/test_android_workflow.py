@@ -98,3 +98,19 @@ def test_android_gate_requires_executed_server_and_export_policy_suites(tmp_path
     server.write_text('<testsuite tests="6" errors="0" failures="0" skipped="0"/>')
     exec(compile(script, "synthetic-native-xml-gate", "exec"), {})
     assert (tmp_path / ".cache/android/native-tests.txt").read_text() == "10"
+
+
+def test_android_junit_failure_name_and_message_survive_diagnostic_annotations(tmp_path, monkeypatch):
+    directory = tmp_path / "android/app/build/test-results/testDebugUnitTest"
+    directory.mkdir(parents=True)
+    (directory / "TEST-synthetic-policy.xml").write_text(
+        '<testsuite><testcase classname="SyntheticPolicyTest" name="rejectsRawControls">'
+        '<failure message="SYNTHETIC raw-control assertion">synthetic assertion trace</failure>'
+        "</testcase></testsuite>"
+    )
+    lines = annotations(tmp_path, monkeypatch, "FAILURE: synthetic native test failure\nBUILD FAILED\n")
+    combined = "".join(unquote(line.split("::", 2)[-1]) for line in lines)
+    assert "SyntheticPolicyTest.rejectsRawControls" in combined
+    assert "SYNTHETIC raw-control assertion" in combined
+    assert "synthetic assertion trace" in combined
+    assert all(len(line.encode()) < 4096 for line in lines)

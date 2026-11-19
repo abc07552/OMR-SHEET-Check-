@@ -15,6 +15,7 @@ export function normalizeServerOrigin(input: string): string {
     .toLowerCase();
   if (
     value.length > 2048 ||
+    /[\u0000-\u001f\u007f-\uffff]/.test(input) ||
     /[\u0000-\u0020\u007f-\uffff]/.test(value) ||
     /[\\%@]/.test(value) ||
     !authority ||

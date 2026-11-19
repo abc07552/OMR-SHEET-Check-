@@ -175,10 +175,10 @@ Executed locally for this feature:
 
 | Check                                      | Observed result                                                                                                                                                                          |
 | ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Full frontend + preserved Node regressions | **215 frontend / 13 files + 30 Node passed**                                                                                                                                             |
-| Full Python suite                          | **159 passed**, SQLite + isolated real PostgreSQL 16.2 QA schemas                                                                                                                        |
-| Targeted discovery/auth/deployment tests   | **28 passed** before adding the two final unavailable-DB/unmounted-client cases; those final cases passed in the full 159-test run                                                       |
-| Production build                           | Passed; 51 static precache entries, 23,143.86 KiB; existing large-chunk warnings retained                                                                                                |
+| Full frontend + preserved Node regressions | **216 frontend / 13 files + 30 Node passed**                                                                                                                                             |
+| Full Python suite                          | **160 passed**, SQLite + isolated real PostgreSQL 16.2 QA schemas                                                                                                                        |
+| Targeted discovery/auth/deployment tests   | **28 passed** before adding the two final unavailable-DB/unmounted-client cases; those final cases passed in the full run                                                                |
+| Production build                           | Passed; 51 static precache entries, 23,143.90 KiB; existing large-chunk warnings retained                                                                                                |
 | Production browser workflow                | **1 passed, 43.6 s**, current Chromium 153, real PostgreSQL schema; setup/team/restricted portals/native OpenCV/reports/encrypted offline flow retained; exact disposable schema cleaned |
 | Android asset synchronization              | Passed, separate `dist-android`; no native SDK/compiler installed locally                                                                                                                |
 | Formatting / TypeScript / Ruff             | Passed; 42 Python files checked/formatted                                                                                                                                                |
@@ -202,3 +202,29 @@ GitHub Actions before delivering a new artifact; no local native build or
 physical-device acceptance is claimed. External hosting/S3/SMTP and real device
 pairing/camera/lifecycle/upgrade/printed-sheet acceptance remain unprovisioned or
 unexecuted. See ANDROID.md and TESTING.md for operator/device checks.
+
+### Native raw-control regression and CI diagnostics
+
+The initial feature checkpoint `fa17f95` passed the full [application/container
+workflow](https://github.com/abc07552/OMR-SHEET-Check-/actions/runs/44601050974)
+(regressions 4m51s, container 1m14s), but its Android JVM test gate failed before
+lint/assembly/artifact publication. No failed-checkpoint APK was delivered.
+
+Inspection and a direct real-JVM reproduction confirmed that Java `String.trim()`
+removes a trailing NUL, turning the native test's unsafe raw URL into an apparently
+valid origin before validation. Native validation now rejects raw controls before
+trimming ordinary surrounding spaces; the shared TypeScript validator also rejects
+surrounding controls before whitespace normalization. Existing native cases are
+retained and expanded, not skipped. A new frontend regression covers surrounding
+controls. A QA-only Java 25 JRE/JPype extraction was used for that primitive-level
+reproduction; neither is an application dependency, Android compiler or change to
+the pinned JDK 21 native build target.
+
+Native failure annotations now include bounded JUnit case names/messages rather
+than only Gradle stack tails. A synthetic XML regression verifies that diagnostics
+retain the real case/message while respecting annotation bounds. The complete
+follow-up local suites passed **216 frontend + 30 Node / 160 Python tests**; final
+Android policy execution, lint, assembly and signature are gated by a fresh current
+branch workflow, not inferred from these local runs. Six actual browser
+viewport/theme connection checks also passed without horizontal overflow or page
+errors and refused unsafe HTTP navigation; no preview administrator was created.

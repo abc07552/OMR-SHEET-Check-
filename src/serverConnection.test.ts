@@ -149,3 +149,13 @@ describe("explicit HTTPS school-server connection policy", () => {
     await expect(disconnectSchoolServer()).rejects.toThrow("Android");
   });
 });
+
+it("rejects raw surrounding control characters before URL whitespace normalization", () => {
+  for (const input of [
+    "\nhttps://school.example",
+    "https://school.example\n",
+    "\u0000https://school.example/",
+  ]) {
+    expect(() => normalizeServerOrigin(input)).toThrow();
+  }
+});
