@@ -1,0 +1,16 @@
+{
+    email {$ACME_EMAIL}
+}
+
+{$APP_DOMAIN} {
+    encode zstd gzip
+    header -Server
+
+    # The application API schema remains available to operators internally.
+    @apiDocumentation path /api/docs /api/openapi.json
+    respond @apiDocumentation "Not found" 404
+
+    # Caddy terminates HTTPS, replaces untrusted forwarded headers, and sends
+    # same-origin /api AND application requests to the non-public ASGI service.
+    reverse_proxy api:8000
+}

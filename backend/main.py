@@ -15,7 +15,7 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .config import Settings
-from .db import engine_for, migrate, sessions_for
+from .db import engine_for, migrate, require_current_schema, sessions_for
 from .models import ScanJob, StoredObject
 from .object_store import ObjectStore
 from .routes import auth, records, reports, scans, workspace
@@ -67,9 +67,15 @@ class BodyLimitMiddleware:
 def create_app(settings: Settings | None = None):
     settings = settings or Settings()
     engine = engine_for(settings)
-    if settings.auto_migrate:
-        migrate(engine)
-    store = ObjectStore(settings)
+    try:
+        if settings.auto_migrate:
+            migrate(engine)
+        else:
+            require_current_schema(engine)
+        store = ObjectStore(settings)
+    except BaseException:
+        engine.dispose()
+        raise
 
     @asynccontextmanager
     async def lifespan(app):

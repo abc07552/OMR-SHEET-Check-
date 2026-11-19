@@ -83,7 +83,12 @@ export function createApp({
           styleSrc: ["'self'", "'unsafe-inline'"],
           imgSrc: ["'self'", "data:", "blob:"],
           workerSrc: ["'self'", "blob:"],
-          connectSrc: ["'self'", "data:", "blob:", ...(webOrigin ? [webOrigin] : [])],
+          connectSrc: [
+            "'self'",
+            "data:",
+            "blob:",
+            ...(webOrigin ? [webOrigin] : []),
+          ],
           fontSrc: ["'self'", "data:"],
         },
       },

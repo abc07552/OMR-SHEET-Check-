@@ -2,6 +2,8 @@ from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
+from alembic.migration import MigrationContext
+from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -48,6 +50,20 @@ def migrate(engine, revision="head"):
         path = Path(engine.url.database)
         if path.exists():
             path.chmod(0o600)
+
+
+def require_current_schema(engine):
+    """Fail closed when production migrations have not been explicitly applied."""
+    config = Config(str(ROOT / "alembic.ini"))
+    config.set_main_option("script_location", str(ROOT / "backend/migrations"))
+    expected = set(ScriptDirectory.from_config(config).get_heads())
+    with engine.connect() as connection:
+        current = set(MigrationContext.configure(connection).get_current_heads())
+    if current != expected:
+        raise RuntimeError(
+            "Database migrations are missing, pending or incompatible. Back up the database, then run "
+            "`alembic upgrade head` with the same DATA_DIR/DATABASE_URL before starting the API."
+        )
 
 
 def sessions_for(engine):

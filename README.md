@@ -30,7 +30,7 @@ VITE_API_PROXY=http://127.0.0.1:8000 npm run dev -- --port 5173
 
 Open port 5173, not a browser-side localhost API URL. Vite proxies relative `/api` requests. The service worker is generated for production builds, not the hot-reload server.
 
-Production requires `APP_ENV=production`, a PostgreSQL `DATABASE_URL`, a stable Fernet `BACKUP_KEY`, an HTTPS `PUBLIC_APP_URL`, and a first-run `SETUP_TOKEN`. Terminate HTTPS at a trusted reverse proxy, persist the data volume, restrict network access and configure backups. See [architecture](documentation/ARCHITECTURE.md) and [migration](documentation/MIGRATION.md). The existing Dockerfile currently targets the preserved Node service; an enterprise container deployment is still being finalized.
+Production requires `APP_ENV=production`, a PostgreSQL `DATABASE_URL`, a stable Fernet `BACKUP_KEY`, an HTTPS `PUBLIC_APP_URL`, and a first-run `SETUP_TOKEN`. The default Dockerfile now packages React + FastAPI with native OCR; `deployment/compose.yaml` supplies private PostgreSQL, explicit Alembic migrations and a Caddy HTTPS ingress. The former Node packaging is preserved in `deployment/Dockerfile.node`. Read the [deployment/backup/upgrade guide](documentation/DEPLOYMENT.md), [architecture](documentation/ARCHITECTURE.md) and [migration guide](documentation/MIGRATION.md). Container/cloud execution must be checked separately from passing local app tests.
 
 ## Working capabilities
 
@@ -71,7 +71,15 @@ npm audit
 .venv/bin/pip check
 ```
 
-The PostgreSQL test user must be allowed to create/drop isolated schemas in the QA database. Do not use production credentials or a database that may be reset by other tooling. Current executed results are in [PROGRESS.md](documentation/PROGRESS.md); dependency checks are snapshots, not security certification.
+The PostgreSQL test user must be allowed to create/drop isolated schemas in the QA database. Do not use production credentials or a database that may be reset by other tooling.
+
+```sh
+# After building; automatically starts/stops a FRESH disposable QA server:
+npx playwright install --with-deps chromium
+OMR_E2E_ALLOW_SETUP=1 npm run test:e2e
+```
+
+The browser regression covers real imports/accounts, native ink detection/review, private student publication, reports, an encrypted offline reload and a genuine disconnected OpenCV.js PDF scan with original upload on reconnect. It also checks 36 enterprise screen/theme/viewport combinations. See [TESTING.md](documentation/TESTING.md) for isolation requirements, migration/recovery drills, failure evidence and exact coverage limits. CI is defined in `.github/workflows/verify.yml`; a committed workflow is not a passed run. Current executed results are in [PROGRESS.md](documentation/PROGRESS.md); dependency checks are snapshots, not security certification.
 
 ## Preserve existing installations
 

@@ -835,8 +835,9 @@ button:disabled {
   gap: 18px;
   margin: 26px 0;
 }
-.portal-stat-grid > section {
+.portal-stat-grid > .card {
   position: relative;
+  margin: 0;
   padding: 24px;
 }
 .portal-stat-grid svg {
@@ -1312,6 +1313,19 @@ button:disabled {
 }
 @media (max-width: 560px) {
   .report-catalogue-grid article {
+    padding: 18px;
+  }
+}
+
+/* These forms are the modal body itself, not a nested inner grid. */
+.modal-body.form-fields.no-padding {
+  padding: 22px 25px;
+}
+.modal-body.form-fields > label {
+  font-size: 11px;
+}
+@media (max-width: 560px) {
+  .modal-body.form-fields.no-padding {
     padding: 18px;
   }
 }

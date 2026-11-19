@@ -66,7 +66,8 @@ npm start
 ### Docker
 
 ```sh
-docker build -t markly .
+docker build -f deployment/Dockerfile.node -t markly .
+# The root Dockerfile now packages the enterprise FastAPI runtime.
 # Supply SETUP_TOKEN through your secret manager or an untracked environment file.
 # Run behind an HTTPS reverse proxy; mount a durable volume at /app/data.
 docker run --env-file .env.production -p 3001:3001 -v markly-data:/app/data markly

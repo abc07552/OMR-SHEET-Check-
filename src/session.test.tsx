@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { createElement } from "react";
+import { createElement, useLayoutEffect } from "react";
 import type { ReactNode } from "react";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { IDBFactory } from "fake-indexeddb";
@@ -15,6 +15,7 @@ import {
   useWorkspaceStore,
 } from "./session";
 import type { AuthUser } from "./session";
+import * as offline from "./offline";
 import {
   cachedSchool,
   enableVault,
@@ -124,6 +125,241 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 describe("session and conflict-aware offline synchronization", () => {
+  it("never renders a saved badge for a changed workspace before the server acknowledges it", async () => {
+    const seen: { teacher: string; status: string }[] = [];
+    const { result } = renderHook(
+      () => {
+        const value = combined();
+        useLayoutEffect(() => {
+          seen.push({
+            teacher: value.store.workspace.teacher,
+            status: value.store.status,
+          });
+        });
+        return value;
+      },
+      { wrapper },
+    );
+    await waitFor(() =>
+      expect(
+        result.current.store.ready &&
+          result.current.store.workspace.activeSchoolId === "s",
+      ).toBe(true),
+    );
+    let release!: () => void;
+    const original = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation((input, init) => {
+      if (String(input).endsWith("/workspace") && init?.method === "PUT")
+        return new Promise((resolve) => {
+          release = () => {
+            void original(input, init).then(resolve);
+          };
+        });
+      return original(input, init);
+    });
+    act(() =>
+      result.current.store.setWorkspace((w) => ({
+        ...w,
+        teacher: "Not acknowledged yet",
+      })),
+    );
+    await waitFor(() => expect(release).toBeTypeOf("function"), {
+      timeout: 3000,
+    });
+    expect(
+      seen
+        .filter((s) => s.teacher === "Not acknowledged yet")
+        .some((s) => s.status === "saved"),
+    ).toBe(false);
+    await act(async () => release());
+    await waitFor(() => expect(result.current.store.status).toBe("saved"));
+    expect(stored.teacher).toBe("Not acknowledged yet");
+  });
+  it("cancels an unsubmitted debounced edit when the user restores the acknowledged workspace", async () => {
+    const { result } = renderHook(combined, { wrapper });
+    await waitFor(() =>
+      expect(
+        result.current.store.ready &&
+          result.current.store.workspace.activeSchoolId === "s",
+      ).toBe(true),
+    );
+    const baseline = result.current.store.workspace;
+    act(() =>
+      result.current.store.setWorkspace((w) => ({
+        ...w,
+        teacher: "A quickly undone draft",
+      })),
+    );
+    act(() => result.current.store.setWorkspace(baseline));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 650));
+    });
+    expect(puts).toHaveLength(0);
+    expect(stored.teacher).toBe(baseline.teacher);
+    expect(result.current.store.status).toBe("saved");
+  });
+  it("persists an offline undo rather than retaining the superseded encrypted draft", async () => {
+    const { result } = renderHook(combined, { wrapper });
+    await waitFor(() =>
+      expect(
+        result.current.store.ready &&
+          result.current.store.workspace.activeSchoolId === "s",
+      ).toBe(true),
+    );
+    const baseline = result.current.store.workspace;
+    await act(async () => {
+      await enableVault(
+        user,
+        "s",
+        baseline,
+        revision,
+        "independent-offline-passphrase",
+      );
+    });
+    act(() => window.dispatchEvent(new Event("offline")));
+    await waitFor(() => expect(result.current.session.offline).toBe(true));
+    act(() =>
+      result.current.store.setWorkspace((w) => ({
+        ...w,
+        teacher: "Superseded offline draft",
+      })),
+    );
+    await waitFor(() => expect(result.current.store.status).toBe("queued"));
+    expect(cachedSchool("s")?.workspace.teacher).toBe(
+      "Superseded offline draft",
+    );
+    act(() => result.current.store.setWorkspace(baseline));
+    await waitFor(() =>
+      expect(cachedSchool("s")?.workspace.teacher).toBe(baseline.teacher),
+    );
+    expect(puts).toHaveLength(0);
+  });
+  it("does not render an offline edit as queued until its encrypted write finishes", async () => {
+    const seen: { teacher: string; status: string }[] = [];
+    const { result } = renderHook(
+      () => {
+        const value = combined();
+        useLayoutEffect(() => {
+          seen.push({
+            teacher: value.store.workspace.teacher,
+            status: value.store.status,
+          });
+        });
+        return value;
+      },
+      { wrapper },
+    );
+    await waitFor(() =>
+      expect(
+        result.current.store.ready &&
+          result.current.store.workspace.activeSchoolId === "s",
+      ).toBe(true),
+    );
+    await act(async () => {
+      await enableVault(
+        user,
+        "s",
+        result.current.store.workspace,
+        revision,
+        "independent-offline-passphrase",
+      );
+    });
+    act(() => window.dispatchEvent(new Event("offline")));
+    await waitFor(() => expect(result.current.store.status).toBe("queued"));
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const originalCache = offline.cacheSchool;
+    const write = vi
+      .spyOn(offline, "cacheSchool")
+      .mockImplementation(async (...args) => {
+        await gate;
+        await originalCache(...args);
+      });
+    act(() =>
+      result.current.store.setWorkspace((w) => ({
+        ...w,
+        teacher: "Encryption still running",
+      })),
+    );
+    await waitFor(() => expect(write).toHaveBeenCalled());
+    expect(
+      seen
+        .filter((s) => s.teacher === "Encryption still running")
+        .some((s) => s.status === "queued"),
+    ).toBe(false);
+    await act(async () => release());
+    await waitFor(() => expect(result.current.store.status).toBe("queued"));
+    expect(cachedSchool("s")?.workspace.teacher).toBe(
+      "Encryption still running",
+    );
+  });
+  it("keeps an undo made during original materialization after the started operation completes", async () => {
+    const { result } = renderHook(combined, { wrapper });
+    await waitFor(() =>
+      expect(
+        result.current.store.ready &&
+          result.current.store.workspace.activeSchoolId === "s",
+      ).toBe(true),
+    );
+    const baseline = result.current.store.workspace;
+    await act(async () => {
+      await enableVault(
+        user,
+        "s",
+        baseline,
+        revision,
+        "independent-offline-passphrase",
+      );
+      await saveOfflineImage(
+        "local-undone-page",
+        new File(["retained pixels"], "sheet.png", { type: "image/png" }),
+      );
+    });
+    let release!: (r: Response) => void;
+    const original = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation((input, init) =>
+      String(input).endsWith("/objects")
+        ? new Promise((resolve) => {
+            release = resolve;
+          })
+        : original(input, init),
+    );
+    act(() =>
+      result.current.store.setWorkspace((w) => ({
+        ...w,
+        results: [
+          {
+            id: "undone-result",
+            studentId: "learner",
+            examId: w.exams[0].id,
+            name: "Learner",
+            roll: "1",
+            section: "A",
+            answers: Array(w.exams[0].questions).fill(null),
+            flagged: [],
+            confirmed: false,
+            source: "scan",
+            createdAt: "2026-11-17",
+            scanIds: ["local-undone-page"],
+          },
+        ],
+      })),
+    );
+    await waitFor(() => expect(release).toBeTypeOf("function"), {
+      timeout: 3000,
+    });
+    act(() => result.current.store.setWorkspace(baseline));
+    await act(async () => release(json({ objectId: "server-original" }, 201)));
+    await waitFor(() => expect(result.current.store.status).toBe("saved"), {
+      timeout: 3000,
+    });
+    expect(puts).toHaveLength(2);
+    expect(puts[0].workspace.results[0].scanIds).toEqual(["server-original"]);
+    expect(stored.results).toEqual([]);
+    expect(result.current.store.workspace.results).toEqual([]);
+  });
   it("clears private projections after changed assignments even when no encrypted vault exists", async () => {
     const { result } = renderHook(useSession, { wrapper });
     await waitFor(() => expect(result.current.phase).toBe("authenticated"));

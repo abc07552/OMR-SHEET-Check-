@@ -185,6 +185,7 @@ function WorkspaceApp() {
     () => scopeWorkspace(enrichWorkspace(full), schoolId),
     [full, schoolId],
   );
+  const assessmentSchool = useRef(schoolId);
   const [page, setPage] = useState<Page>(hashPage),
     [examId, setExamId] = useState(() => workspace.exams.at(-1)?.id || ""),
     [studentId, setStudentId] = useState<string | null>(null),
@@ -255,9 +256,16 @@ function WorkspaceApp() {
     document.title = `${pages.find((p) => p.id === page)?.label || "Overview"} — ULTIMATE OMR CHECKER AI PRO`;
   }, [page]);
   useEffect(() => {
-    setStudentId(null);
-    setExamId(workspace.exams.at(-1)?.id || "");
-  }, [schoolId, store.ready]);
+    if (!store.ready) return;
+    const changedSchool = assessmentSchool.current !== schoolId;
+    assessmentSchool.current = schoolId;
+    if (changedSchool) setStudentId(null);
+    setExamId((current) =>
+      !changedSchool && workspace.exams.some((e) => e.id === current)
+        ? current
+        : workspace.exams.at(-1)?.id || "",
+    );
+  }, [schoolId, store.ready, workspace.exams]);
   const updateScoped = (changed: Workspace) =>
     setWorkspace((w) =>
       mergeSchoolWorkspace(
@@ -523,7 +531,7 @@ function WorkspaceApp() {
         <aside className={`sidebar ${mobile ? "sidebar-open" : ""}`}>
           <button
             className="logo-button"
-            aria-label="Markly home"
+            aria-label="OMR Pro home"
             onClick={() => navigate("overview")}
           >
             <Logo />
@@ -1062,7 +1070,7 @@ function WorkspaceApp() {
             </Suspense>
             <footer className="v2-page-footer">
               <span>
-                markly<span>.</span> <i /> A little more possibility.
+                omr<span> PRO</span> <i /> Every answer, accounted for.
               </span>
               <span>
                 <span className="live-dot" />

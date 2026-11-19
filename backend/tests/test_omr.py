@@ -51,11 +51,10 @@ def sheet_image(exam, selections=None, qr=True, page=0):
             "r": "10001",
             "l": signature(exam),
         }
-        image = np.asarray(
-            zxingcpp.write_barcode(
-                zxingcpp.BarcodeFormat.QRCode, json.dumps(meta, separators=(",", ":")), width=170, height=170
-            )
-        )
+        barcode = zxingcpp.create_barcode(json.dumps(meta, separators=(",", ":")), zxingcpp.BarcodeFormat.QRCode)
+        modules = np.asarray(zxingcpp.write_barcode_to_image(barcode))
+        scale = max(1, 170 // modules.shape[0])
+        image = cv2.resize(modules, None, fx=scale, fy=scale, interpolation=cv2.INTER_NEAREST)
         h, w = image.shape
         canvas[200 : 200 + h, 1030 : 1030 + w] = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
     return canvas

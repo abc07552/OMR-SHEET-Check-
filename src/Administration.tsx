@@ -505,6 +505,8 @@ function MemberEditor({
               <label>
                 Initial password
                 <input
+                  aria-label="Initial password"
+                  aria-describedby="member-password-guidance"
                   required
                   type="password"
                   minLength={12}
@@ -513,7 +515,7 @@ function MemberEditor({
                   onChange={(e) => setPassword(e.target.value)}
                   autoComplete="new-password"
                 />
-                <small className="muted">
+                <small id="member-password-guidance" className="muted">
                   12–128 characters. Existing accounts retain their own
                   password.
                 </small>
@@ -639,7 +641,7 @@ function MemberEditor({
           </button>
           <button className="button button-primary" disabled={busy}>
             <ShieldCheck size={16} />
-            {busy ? "Saving…" : "Save access"}
+            {busy ? "Saving…" : member ? "Save access" : "Add member"}
           </button>
         </div>
       </form>

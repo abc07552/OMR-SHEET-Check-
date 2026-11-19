@@ -392,6 +392,7 @@ export default function Scanner({
               ...read.flagged.map((q) => offset + q),
             ],
             confirmed: false,
+            missingPagesAccepted: false,
             pageIndices: [...new Set([...(result.pageIndices || [0]), p])].sort(
               (a, b) => a - b,
             ),

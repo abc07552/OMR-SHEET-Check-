@@ -10,7 +10,7 @@
     "preview": "vite preview --host 0.0.0.0",
     "preview:pages": "vite preview --host 0.0.0.0 --base=/OMR-SHEET-Check-/ --outDir=docs",
     "test": "vitest run src",
-    "format": "prettier --write src server scripts index.html vite.config.ts tsconfig*.json README.md THIRD_PARTY.md",
+    "format": "prettier --write src server scripts e2e index.html vite.config.ts playwright.config.ts tsconfig*.json package.json README.md THIRD_PARTY.md documentation/TESTING.md documentation/DEPLOYMENT.md documentation/PROGRESS.md deployment/compose.yaml .github/workflows/verify.yml",
     "predev": "node scripts/prepare-assets.mjs",
     "prebuild": "node scripts/prepare-assets.mjs",
     "prebuild:pages": "node scripts/prepare-assets.mjs",
@@ -18,7 +18,9 @@
     "start": "node --env-file-if-exists=.env server/index.mjs",
     "test:server": "node --test server/*.test.mjs",
     "test:all": "npm test && npm run test:server",
-    "admin:reset": "node --env-file-if-exists=.env server/reset-password.mjs"
+    "admin:reset": "node --env-file-if-exists=.env server/reset-password.mjs",
+    "test:e2e": "playwright test",
+    "format:check": "prettier --check src server scripts e2e index.html vite.config.ts playwright.config.ts tsconfig*.json package.json README.md THIRD_PARTY.md documentation/TESTING.md documentation/DEPLOYMENT.md documentation/PROGRESS.md deployment/compose.yaml .github/workflows/verify.yml"
   },
   "dependencies": {
     "@fontsource-variable/dm-sans": "^5.2.6",

@@ -3,12 +3,13 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
 import type { Dispatch, ReactNode, SetStateAction } from "react";
 import type { Workspace } from "./data";
-import { enrichWorkspace, loadWorkspace } from "./data";
+import { downloadFile, enrichWorkspace, loadWorkspace } from "./data";
 import { saveSnapshot } from "./storage";
 import {
   authorizationChanged,
@@ -93,7 +94,6 @@ export async function apiDownload(path: string, filename: string) {
       response.status,
     );
   }
-  const { downloadFile } = await import("./data");
   downloadFile(filename, await response.blob());
 }
 interface Session {
@@ -434,7 +434,12 @@ export function useWorkspaceStore() {
   const [workspace, setWorkspace] = useState<Workspace>(loadWorkspace),
     [ready, setReady] = useState(!cloud),
     [status, setStatus] = useState<SaveStatus>("saved"),
-    [error, setError] = useState("");
+    [error, setError] = useState(""),
+    [queuedWorkspace, setQueuedWorkspace] = useState<Workspace>();
+  const serializedWorkspace = useMemo(
+    () => JSON.stringify(workspace),
+    [workspace],
+  );
   const sync = useRef({
       revision: 0,
       lastSaved: "",
@@ -448,14 +453,27 @@ export function useWorkspaceStore() {
     timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const offlineNow = useRef(session.offline);
   offlineNow.current = session.offline;
+  // Do not expose a one-render "saved"/"queued" window before passive effects
+  // notice an edit. These labels authorize navigation/reload as well as the UI.
+  const displayStatus: SaveStatus =
+    cloud &&
+    ready &&
+    ((status === "saved" && serializedWorkspace !== sync.current.lastSaved) ||
+      (status === "queued" && queuedWorkspace !== workspace))
+      ? "saving"
+      : status;
   const persistQueue = async (current: Workspace) => {
-    if (session.user && vaultEnabled(session.user.id))
-      await cacheSchool(schoolId, {
-        workspace: current,
-        revision: sync.current.revision,
-        pending: sync.current.pending || undefined,
-        inflight: sync.current.inflight,
-      });
+    const epoch = sync.current.epoch;
+    if (!session.user || !vaultEnabled(session.user.id)) return false;
+    await cacheSchool(schoolId, {
+      workspace: current,
+      revision: sync.current.revision,
+      pending: sync.current.pending || undefined,
+      inflight: sync.current.inflight,
+    });
+    if (epoch !== sync.current.epoch) return false;
+    setQueuedWorkspace(current);
+    return true;
   };
   const load = async (discard = false) => {
     const epoch = ++sync.current.epoch;
@@ -487,10 +505,13 @@ export function useWorkspaceStore() {
         failed: false,
       };
       setWorkspace(w);
+      setQueuedWorkspace(pendingCache || session.offline ? w : undefined);
       setStatus(pendingCache || session.offline ? "queued" : "saved");
       setReady(true);
-      if (!pendingCache && session.user && vaultEnabled(session.user.id))
+      if (!pendingCache && session.user && vaultEnabled(session.user.id)) {
         await cacheSchool(schoolId, { workspace: w, revision: data.revision });
+        if (epoch === sync.current.epoch) setQueuedWorkspace(w);
+      }
     } catch (e) {
       if (epoch === sync.current.epoch) {
         setError(
@@ -588,6 +609,8 @@ export function useWorkspaceStore() {
         );
         setError("");
         void queryClient.invalidateQueries({ queryKey: ["dashboard-metrics"] });
+        void queryClient.invalidateQueries({ queryKey: ["result-history"] });
+        void queryClient.invalidateQueries({ queryKey: ["audit"] });
       }
     } catch (e) {
       if (epoch !== sync.current.epoch) return;
@@ -604,9 +627,31 @@ export function useWorkspaceStore() {
   };
   useEffect(() => {
     if (!ready) return;
-    const json = JSON.stringify(workspace);
+    const json = serializedWorkspace;
     if (cloud) {
-      if (json === sync.current.lastSaved && !sync.current.inflight) return;
+      if (
+        !session.offline &&
+        json === sync.current.lastSaved &&
+        !sync.current.inflight &&
+        !sync.current.busy &&
+        !sync.current.failed
+      ) {
+        const canceledPending = !!sync.current.pending;
+        sync.current.pending = "";
+        clearTimeout(timer.current);
+        setStatus("saved");
+        // An undo before submission must cancel the old debounce AND replace
+        // any previously encrypted pending draft, not resurrect it on reload.
+        if (canceledPending) {
+          const epoch = sync.current.epoch;
+          void persistQueue(workspace).catch((e) => {
+            if (epoch !== sync.current.epoch) return;
+            setStatus("error");
+            setError(String(e));
+          });
+        }
+        return;
+      }
       if (json !== sync.current.inflight?.payload) sync.current.pending = json;
       clearTimeout(timer.current);
       if (session.offline) {
@@ -618,12 +663,19 @@ export function useWorkspaceStore() {
           return;
         }
         setStatus("saving");
+        const epoch = sync.current.epoch;
         void persistQueue(workspace)
-          .then(() => {
+          .then((persisted) => {
+            if (epoch !== sync.current.epoch) return;
+            if (!persisted)
+              throw new Error(
+                "The offline vault locked before this change could be retained. Export unsaved work before leaving.",
+              );
             setStatus("queued");
             setError("");
           })
           .catch((e) => {
+            if (epoch !== sync.current.epoch) return;
             setStatus("error");
             setError(String(e));
           });
@@ -652,7 +704,7 @@ export function useWorkspaceStore() {
         setError("Device storage is full or disabled. Export a backup now.");
       }
     }
-  }, [workspace, cloud, ready, session.offline]);
+  }, [workspace, serializedWorkspace, cloud, ready, session.offline]);
   useEffect(() => {
     if (
       !session.offline &&
@@ -666,8 +718,8 @@ export function useWorkspaceStore() {
   useEffect(() => {
     const unload = (e: BeforeUnloadEvent) => {
       if (
-        (cloud && status !== "saved" && status !== "queued") ||
-        status === "error"
+        (cloud && displayStatus !== "saved" && displayStatus !== "queued") ||
+        displayStatus === "error"
       ) {
         e.preventDefault();
         e.returnValue = "";
@@ -675,12 +727,12 @@ export function useWorkspaceStore() {
     };
     window.addEventListener("beforeunload", unload);
     return () => window.removeEventListener("beforeunload", unload);
-  }, [cloud, status]);
+  }, [cloud, displayStatus]);
   return {
     workspace,
     setWorkspace: setWorkspace as Dispatch<SetStateAction<Workspace>>,
     ready,
-    status,
+    status: displayStatus,
     error,
     cloud,
     revision: sync.current.revision,

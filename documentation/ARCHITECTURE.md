@@ -4,7 +4,7 @@
 
 The verified Markly React/OpenCV.js application and Node/SQLite backend are preserved in commit `8b5360f`. The enterprise backend lives in `backend/`: FastAPI, Pydantic 2, SQLAlchemy 2, Alembic, psycopg 3, Argon2id, OpenCV, NumPy, Pillow, ZXing, ReportLab and openpyxl. PostgreSQL is required in production; a separate `enterprise.sqlite` is a local fallback. Existing `markly.sqlite` is never reset or overwritten.
 
-The React application remains the scanner/designer/reporting client. Enterprise screens are being connected to these APIs; an API's existence is not a claim that its UI or cloud deployment has been verified.
+The React application remains the scanner/designer/reporting client. Enterprise screens now use the authenticated API and encrypted offline projection. The committed browser suite exercises the real import/account/native-scan/review/report/privacy/offline-PDF-sync workflow. This is not evidence of a deployed cloud service or arbitrary physical-photo accuracy; see `TESTING.md` and `PROGRESS.md` for exact limits.
 
 ## Trust boundaries
 
@@ -29,7 +29,7 @@ The server's Tesseract integration is optional and explicitly reports when its e
 
 ## Storage / cloud
 
-`DATABASE_URL=postgresql+psycopg://...` selects PostgreSQL. `S3_BUCKET`, region, optional endpoint and standard AWS credentials select S3-compatible object storage; otherwise encrypted local objects are used. Remote SMTP enables email recovery. Without these settings the application is a local server, **not a deployed cloud service**. A QA PostgreSQL 16.2 binary supplied by an optional test-only wheel is isolated on a private Unix socket; it must not be used as a production database.
+`DATABASE_URL=postgresql+psycopg://...` selects PostgreSQL. The enterprise Docker/Compose topology uses explicit Alembic migrations, a non-root Python runtime, a private non-superuser PostgreSQL role and a same-origin Caddy HTTPS ingress. With automatic migrations disabled, startup requires the exact application migration head before accepting traffic. See `DEPLOYMENT.md` for operational/verification limits. `S3_BUCKET`, region, optional endpoint and standard AWS credentials select S3-compatible object storage; otherwise encrypted local objects are used. Remote SMTP enables email recovery. Without these settings the application is a local server, **not a deployed cloud service**. A QA PostgreSQL 16.2 binary supplied by an optional test-only wheel is isolated on a private Unix socket; it must not be used as a production database.
 
 Workspace recovery points do not replace database disaster-recovery backups, original-image backups, the encryption key, or off-site retention. Use managed PostgreSQL point-in-time recovery and versioned object storage for production. Losing the encryption key makes stored encrypted objects unrecoverable.
 
