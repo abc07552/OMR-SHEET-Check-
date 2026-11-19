@@ -1,0 +1,85 @@
+{
+  "name": "markly-omr",
+  "private": true,
+  "version": "2.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "tsc -b && vite build",
+    "build:pages": "tsc -b && vite build --base=/OMR-SHEET-Check-/ --outDir=docs",
+    "preview": "vite preview --host 0.0.0.0",
+    "preview:pages": "vite preview --host 0.0.0.0 --base=/OMR-SHEET-Check-/ --outDir=docs",
+    "test": "vitest run src",
+    "format": "prettier --write src server scripts e2e index.html vite.config.ts playwright.config.ts tsconfig*.json package.json README.md THIRD_PARTY.md documentation/TESTING.md documentation/DEPLOYMENT.md documentation/PROGRESS.md documentation/ARCHITECTURE.md documentation/ACCEPTANCE.md documentation/SECURITY_AUDIT.md documentation/PERFORMANCE.md deployment/compose.yaml .github/workflows/verify.yml capacitor.config.ts .github/workflows/main.yml documentation/ANDROID.md",
+    "predev": "node scripts/prepare-assets.mjs",
+    "prebuild": "node scripts/prepare-assets.mjs",
+    "prebuild:pages": "node scripts/prepare-assets.mjs",
+    "server": "node --env-file-if-exists=.env server/index.mjs",
+    "start": "node --env-file-if-exists=.env server/index.mjs",
+    "test:server": "node --test server/*.test.mjs",
+    "test:all": "npm test && npm run test:server",
+    "admin:reset": "node --env-file-if-exists=.env server/reset-password.mjs",
+    "test:e2e": "playwright test",
+    "format:check": "prettier --check src server scripts e2e index.html vite.config.ts playwright.config.ts tsconfig*.json package.json README.md THIRD_PARTY.md documentation/TESTING.md documentation/DEPLOYMENT.md documentation/PROGRESS.md documentation/ARCHITECTURE.md documentation/ACCEPTANCE.md documentation/SECURITY_AUDIT.md documentation/PERFORMANCE.md deployment/compose.yaml .github/workflows/verify.yml capacitor.config.ts .github/workflows/main.yml documentation/ANDROID.md",
+    "android:sync": "node scripts/prepare-android.mjs",
+    "android:debug": "npm run android:sync && cd android && ./gradlew --no-daemon assembleDebug",
+    "android:open": "cap open android"
+  },
+  "dependencies": {
+    "@capacitor/android": "8.6.2",
+    "@capacitor/core": "8.6.2",
+    "@fontsource-variable/dm-sans": "^5.2.6",
+    "@hookform/resolvers": "7.0.7",
+    "@tailwindcss/vite": "4.3.5",
+    "@tanstack/react-query": "5.108.0",
+    "@techstark/opencv-js": "^4.12.0-release.1",
+    "@tesseract.js-data/eng": "^1.0.0",
+    "decimal.js": "10.6.0",
+    "exceljs": "^4.4.0",
+    "express": "^5.3.0",
+    "helmet": "^8.3.0",
+    "jspdf": "^4.2.1",
+    "jspdf-autotable": "^5.0.9",
+    "jsqr": "^1.4.0",
+    "lucide-react": "^0.468.0",
+    "pdfjs-dist": "^6.5.438",
+    "qrcode": "^1.5.4",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-hook-form": "7.92.0",
+    "react-router-dom": "7.18.6",
+    "recharts": "^2.15.1",
+    "tailwindcss": "4.3.5",
+    "tesseract.js": "^7.0.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.6.2",
+    "@playwright/test": "1.65.1",
+    "@testing-library/react": "16.3.3",
+    "@types/node": "^22.10.5",
+    "@types/qrcode": "^1.5.6",
+    "@types/react": "^19.0.3",
+    "@types/react-dom": "^19.0.2",
+    "@vitejs/plugin-react": "^4.3.4",
+    "fake-indexeddb": "6.2.8",
+    "jsdom": "31.0.1",
+    "prettier": "^3.10.1",
+    "supertest": "^7.3.2",
+    "typescript": "~5.7.2",
+    "vite": "^6.0.5",
+    "vite-plugin-pwa": "2.0.0",
+    "vitest": "^5.1.0"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "overrides": {
+    "exceljs": {
+      "uuid": "^11.1.1"
+    },
+    "workbox-build": {
+      "glob": "14.0.6"
+    }
+  }
+}

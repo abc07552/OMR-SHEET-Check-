@@ -2,26 +2,166 @@ name: Build Android APK
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [main, "arena/**"]
+    paths:
+      - "android/**"
+      - "capacitor.config.ts"
+      - "src/**"
+      - "public/**"
+      - "scripts/prepare-*.mjs"
+      - "package*.json"
+      - "tsconfig*.json"
+      - "vite.config.ts"
+      - "index.html"
+      - ".github/workflows/main.yml"
+  pull_request:
+    paths:
+      - "android/**"
+      - "capacitor.config.ts"
+      - "src/**"
+      - "public/**"
+      - "scripts/prepare-*.mjs"
+      - "package*.json"
+      - "tsconfig*.json"
+      - "vite.config.ts"
+      - "index.html"
+      - ".github/workflows/main.yml"
   workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: omr-android-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    name: Compile, test, lint and verify Android debug APK
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      # Optional PUBLIC origin of the complete HTTPS app + same-origin /api.
+      # Empty means an explicitly labelled device-only demo, not fake sign-in.
+      OMR_ANDROID_SERVER_URL: ${{ vars.ANDROID_SERVER_URL }}
+      OMR_ANDROID_VERSION_CODE: ${{ github.run_number }}
     steps:
-      - uses: actions/checkout@v4
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          java-version: '17'
-          distribution: 'temurin'
-      - name: Grant execute permission for gradlew
-        run: chmod +x gradlew
-      - name: Build Debug APK
-        run: ./gradlew assembleDebug
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
+          node-version: "24"
+          cache: npm
+      - name: Set up JDK 21
+        uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         with:
-          name: app-debug
-          path: app/build/outputs/apk/debug/app-debug.apk
-          
+          java-version: "21"
+          distribution: temurin
+      - name: Set up Android SDK 36
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
+        with:
+          cmdline-tools-version: "15859902"
+          packages: "platform-tools platforms;android-36 build-tools;36.0.0"
+          log-accepted-android-sdk-licenses: false
+      - name: Validate wrapper and cache Gradle
+        uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        with:
+          cache-read-only: ${{ github.event_name == 'pull_request' }}
+      - name: Install locked web and Capacitor dependencies
+        run: npm ci
+      - name: Frontend and native-bridge regressions
+        run: npm test
+      - name: Build bundled web assets and synchronize the Android project
+        run: npm run android:sync
+      - name: Compile APK, run JVM tests and Android lint
+        working-directory: android
+        run: |
+          set -euo pipefail
+          mkdir -p ../.cache/android
+          test -x ./gradlew
+          ./gradlew --no-daemon --console=plain --stacktrace testDebugUnitTest lintDebug assembleDebug 2>&1 | tee ../.cache/android/gradle.log
+      - name: Verify signed APK and stage download
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+          path = Path('android/app/build/test-results/testDebugUnitTest/TEST-com.markly.omrpro.ExportPolicyTest.xml')
+          suite = ET.parse(path).getroot()
+          tests = int(suite.attrib['tests'])
+          assert tests >= 4 and all(int(suite.attrib.get(key, 0)) == 0 for key in ('failures', 'errors', 'skipped')), suite.attrib
+          Path('.cache/android/native-tests.txt').write_text(str(tests))
+          print(f'{tests} native JVM export-policy tests passed with no failures/errors/skips.')
+          PY
+          apk=android/app/build/outputs/apk/debug/app-debug.apk
+          test -s "$apk"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose "$apk"
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$apk" | tee .cache/android/apk-manifest.txt
+          grep -q "package: name='com.markly.omrpro.debug'" .cache/android/apk-manifest.txt
+          grep -q "sdkVersion:'24'" .cache/android/apk-manifest.txt
+          grep -q "targetSdkVersion:'36'" .cache/android/apk-manifest.txt
+          grep -q "launchable-activity:" .cache/android/apk-manifest.txt
+          mkdir -p .cache/android/apk
+          cp "$apk" .cache/android/apk/omr-checker-ai-pro-debug.apk
+          (cd .cache/android/apk && sha256sum omr-checker-ai-pro-debug.apk > SHA256SUMS.txt)
+          node --input-type=module <<'JS'
+          import fs from 'node:fs';
+          const config = JSON.parse(fs.readFileSync('android/app/src/main/assets/capacitor.config.json', 'utf8'));
+          const mode = config.server?.url ? `Hosted school app: ${config.server.url}` : 'Device-only demo. No school backend is configured.';
+          const nativeTests = fs.readFileSync('.cache/android/native-tests.txt', 'utf8');
+          const digest = fs.readFileSync('.cache/android/apk/SHA256SUMS.txt', 'utf8').split(/\s+/)[0];
+          console.log(`::notice title=Verified Android APK::Commit ${process.env.GITHUB_SHA}; ${nativeTests} JVM tests passed; lint/build/signature/manifest passed; SHA-256 ${digest}; ${mode}`);
+          const info = `OMR Checker AI Pro — DEBUG TEST BUILD\nCommit: ${process.env.GITHUB_SHA}\nRun: ${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}\nNative JVM tests: ${nativeTests} passed; lint/build/signature/manifest verified.\nAndroid 7.0 / API 24 or newer; current Android System WebView required.\n${mode}\nPython/PostgreSQL are not embedded. This is not a Play Store release.\nCompilation, JVM tests and lint do not certify physical camera/scanner/device behavior.\nBack up local work before replacing an APK signed by a different debug key.\n`;
+          fs.writeFileSync('.cache/android/apk/BUILD-INFO.txt', info);
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `## Android debug APK\n\n${info}\n\nDownload the **omr-checker-android-debug** artifact below.\n`);
+          JS
+      - name: Upload verified debug APK and checksum
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: omr-checker-android-debug
+          path: .cache/android/apk/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+      - name: Retain Android test and lint reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: android-qa-reports
+          path: |
+            android/app/build/reports/tests/testDebugUnitTest/
+            android/app/build/test-results/testDebugUnitTest/*.xml
+            android/app/build/reports/lint-results-debug.*
+            .cache/android/gradle.log
+            .cache/android/apk-manifest.txt
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Summarize native build failure
+        if: failure()
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('.cache/android/gradle.log')
+          if path.exists():
+              lines = path.read_text(errors='replace').splitlines()
+              # Prefer the actual cause, not the end of a potentially huge stack.
+              contexts = []
+              for index, line in enumerate(lines):
+                  if '* What went wrong:' in line:
+                      contexts.extend(lines[index:index + 14])
+                      break
+              important = [line for line in lines if any(word in line for word in ('error:', 'Execution failed', 'Could not', 'FAILURE:', 'Error:'))]
+              manifest = Path('.cache/android/apk-manifest.txt')
+              extra = manifest.read_text(errors='replace').splitlines()[:25] if manifest.exists() else []
+              message = '\n'.join(contexts + important[:15] + lines[-15:] + extra).encode()[:16000]
+              # 900 raw bytes stay below annotation limits even when every byte
+              # needs percent/newline escaping (3x expansion).
+              for start in range(0, len(message), 900):
+                  part = message[start:start + 900].decode(errors='replace')
+                  part = part.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+                  print(f'::warning title=Android build diagnostics::{part}')
+          PY

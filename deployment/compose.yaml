@@ -1,0 +1,114 @@
+# Run from the repository root; see documentation/DEPLOYMENT.md.
+name: omr-pro
+
+x-api: &api
+  image: omr-pro:local
+  build:
+    context: ..
+    dockerfile: Dockerfile
+  environment:
+    APP_ENV: production
+    DATABASE_URL: postgresql+psycopg://omr:${POSTGRES_PASSWORD:?Set a URL-safe random POSTGRES_PASSWORD in .env}@db:5432/omr
+    DATA_DIR: /app/data
+    AUTO_MIGRATE: "false"
+    BACKUP_KEY: ${BACKUP_KEY:?Set a persistent Fernet BACKUP_KEY in .env}
+    PUBLIC_APP_URL: https://${APP_DOMAIN:?Set your real APP_DOMAIN in .env}
+    SETUP_TOKEN: ${SETUP_TOKEN:-}
+    PUBLIC_WEB_ORIGIN: ""
+    SMTP_HOST: ${SMTP_HOST:-}
+    SMTP_PORT: ${SMTP_PORT:-587}
+    SMTP_FROM: ${SMTP_FROM:-}
+    SMTP_USER: ${SMTP_USER:-}
+    SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+    S3_BUCKET: ${S3_BUCKET:-}
+    S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-}
+    AWS_REGION: ${AWS_REGION:-ap-south-1}
+    AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+    AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+    AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
+  volumes:
+    - application-data:/app/data
+  networks:
+    - omr
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  read_only: true
+  tmpfs:
+    - /tmp:size=256m,mode=1777
+  init: true
+
+services:
+  db:
+    image: postgres:17-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_DB: omr
+      POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD:?Set a separate POSTGRES_ADMIN_PASSWORD in .env}
+      OMR_DB_PASSWORD: ${POSTGRES_PASSWORD:?Set the application POSTGRES_PASSWORD in .env}
+    volumes:
+      - database-data:/var/lib/postgresql/data
+      - ./postgres-init.sql:/docker-entrypoint-initdb.d/10-omr.sql:ro
+    networks:
+      - omr
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d omr"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    # No public database port.
+
+  migrate:
+    <<: *api
+    profiles: ["maintenance"]
+    command: ["alembic", "upgrade", "head"]
+    healthcheck:
+      disable: true
+    depends_on:
+      db:
+        condition: service_healthy
+
+  api:
+    <<: *api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    # No public API port: only the trusted reverse proxy reaches it.
+
+  web:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:?Set APP_DOMAIN in .env}
+      ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - tls-data:/data
+      - tls-config:/config
+    networks:
+      omr:
+        ipv4_address: 172.29.241.10
+    depends_on:
+      api:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  application-data:
+  database-data:
+  tls-data:
+  tls-config:
+
+networks:
+  omr:
+    ipam:
+      config:
+        - subnet: 172.29.241.0/24
