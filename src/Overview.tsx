@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useSession } from "./session";
 import {
   Area,
   AreaChart,
@@ -52,6 +53,7 @@ export function ExamBar({
   exam,
   setExamId,
 }: Pick<Props, "workspace" | "exam" | "setExamId">) {
+  const session = useSession();
   const sections = [
     ...new Set(
       workspace.results
@@ -95,7 +97,9 @@ export function ExamBar({
         <span className="vertical-rule" />
         <span className="sync-status">
           <span />
-          Saved on this device
+          {session.phase === "authenticated"
+            ? "Shared server workspace"
+            : "Device workspace"}
         </span>
       </div>
     </div>

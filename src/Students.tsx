@@ -12,6 +12,7 @@ import {
   Save,
   ScanLine,
   Search,
+  Trash2,
   Users,
   X,
 } from "lucide-react";
@@ -21,7 +22,9 @@ import {
   formatNumber,
   getStats,
   gradeResult,
-  OPTIONS,
+  getOptions,
+  rankings,
+  subjectStats,
   resultsCSV,
 } from "./data";
 import {
@@ -36,6 +39,7 @@ import {
   StatusBadge,
 } from "./components";
 import { ExamBar } from "./Overview";
+import { studentPDF } from "./documents";
 interface Props {
   workspace: Workspace;
   exam: Exam;
@@ -341,8 +345,8 @@ export default function Students({
       </section>
       <p className="page-bottom-note">
         <Check size={13} />
-        Your class data is only stored on this device. Export a copy to keep it
-        safe.
+        Results follow your workspace storage mode. Keep a separate backup for
+        long-term safety.
       </p>
     </>
   );
@@ -353,27 +357,62 @@ export function StudentDetail({
   allResults,
   onClose,
   onUpdate,
+  onDelete,
   toast,
+  workspace,
 }: {
+  workspace?: Workspace;
   result: Result;
   exam: Exam;
   allResults: Result[];
   onClose: () => void;
-  onUpdate: (r: Result) => void;
+  onUpdate: (r: Result) => boolean | void;
+  onDelete?: () => void;
   toast: (text: string) => void;
 }) {
   const [answers, setAnswers] = useState([...result.answers]);
+  const [name, setName] = useState(result.name);
+  const [roll, setRoll] = useState(result.roll);
+  const [section, setSection] = useState(result.section);
+  const [identityVerified, setIdentityVerified] = useState(
+    !result.identityReview,
+  );
+  const [acceptMissing, setAcceptMissing] = useState(
+    !!result.missingPagesAccepted,
+  );
+  const [pdfBusy, setPDFBusy] = useState(false);
   const [flagged, setFlagged] = useState([...result.flagged]);
   const [activeQuestion, setActiveQuestion] = useState<number | null>(
     result.flagged[0] ?? null,
   );
   const [editing, setEditing] = useState(false);
-  const draft = { ...result, answers, flagged };
+  const draft = {
+    ...result,
+    answers,
+    flagged,
+    name: name.trim(),
+    roll: roll.trim(),
+    section: section.trim(),
+    identityReview: !identityVerified,
+    missingPagesAccepted: acceptMissing,
+  };
+  const rank = rankings(allResults, exam).find(
+    (r) => r.result.id === result.id,
+  );
   const graded = gradeResult(draft, exam);
   const classAverage = getStats(allResults, exam).average;
   const dirty =
     JSON.stringify(answers) !== JSON.stringify(result.answers) ||
-    JSON.stringify(flagged) !== JSON.stringify(result.flagged);
+    JSON.stringify(flagged) !== JSON.stringify(result.flagged) ||
+    name !== result.name ||
+    roll !== result.roll ||
+    section !== result.section ||
+    identityVerified !== !result.identityReview ||
+    acceptMissing !== !!result.missingPagesAccepted;
+  const close = () => {
+    if (!dirty || confirm("Discard unsaved response or identity changes?"))
+      onClose();
+  };
   const setResponse = (option: Option | null) => {
     if (activeQuestion === null) return;
     setAnswers((a) => a.map((v, i) => (i === activeQuestion ? option : v)));
@@ -381,7 +420,12 @@ export function StudentDetail({
     setEditing(true);
   };
   const save = () => {
-    onUpdate({ ...draft, confirmed: flagged.length === 0 });
+    if (!name.trim() || !roll.trim() || !section.trim()) {
+      toast("Name, roll number and class are required.");
+      return;
+    }
+    if (onUpdate({ ...draft, confirmed: flagged.length === 0 }) === false)
+      return;
     setEditing(false);
     toast(
       flagged.length
@@ -393,7 +437,7 @@ export function StudentDetail({
   return (
     <Modal
       title="A closer look at their progress"
-      onClose={onClose}
+      onClose={close}
       className="student-modal"
     >
       <div className="student-detail-body">
@@ -438,6 +482,119 @@ export function StudentDetail({
             <span>Unanswered</span>
           </div>
         </div>
+        <div className="result-identity-fields">
+          <div className="form-two-columns">
+            <label>
+              Student name
+              <input
+                value={name}
+                maxLength={120}
+                onChange={(e) => setName(e.target.value)}
+              />
+            </label>
+            <label>
+              Roll number
+              <input
+                value={roll}
+                maxLength={40}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setRoll(value);
+                  const registered = workspace?.students?.find(
+                    (s) => s.roll.toLowerCase() === value.toLowerCase(),
+                  );
+                  if (registered) {
+                    setName(registered.name);
+                    setSection(registered.section);
+                  }
+                }}
+              />
+            </label>
+          </div>
+          <label>
+            Class / section
+            <input
+              value={section}
+              maxLength={60}
+              onChange={(e) => setSection(e.target.value)}
+            />
+          </label>
+          {result.identityReview && (
+            <label className="checkbox-label warning">
+              <input
+                type="checkbox"
+                checked={identityVerified}
+                onChange={(e) => setIdentityVerified(e.target.checked)}
+              />
+              I have verified this student’s identity against the sheet.
+            </label>
+          )}
+          {gradeResult(result, exam).missingPages && (
+            <div className="v2-notice warning">
+              <CircleAlert size={17} />
+              <div>
+                <strong>Some answer-sheet pages are missing.</strong>
+                <p>
+                  Received pages:{" "}
+                  {(result.pageIndices || []).map((p) => p + 1).join(", ") ||
+                    "none"}
+                  . Scan the remaining pages, or explicitly accept the missing
+                  responses as unanswered.
+                </p>
+                <label className="checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={acceptMissing}
+                    onChange={(e) => setAcceptMissing(e.target.checked)}
+                  />
+                  Accept missing pages as unanswered
+                </label>
+              </div>
+            </div>
+          )}
+        </div>
+        <div className="student-ranking-strip">
+          <span>
+            Overall rank{" "}
+            <strong>{rank ? `#${rank.rank}` : "Under review"}</strong>
+          </span>
+          <span>
+            Percentile{" "}
+            <strong>{rank ? rank.percentile.toFixed(2) : "—"}</strong>
+          </span>
+          <span>
+            Mark confidence{" "}
+            <strong>
+              {result.scanConfidence !== undefined
+                ? `${result.scanConfidence.toFixed(0)}%`
+                : "Manual / sample"}
+            </strong>
+          </span>
+        </div>
+        {exam.subjects?.length ? (
+          <div className="result-subjects">
+            {subjectStats(
+              [
+                {
+                  ...draft,
+                  flagged: [],
+                  confirmed: true,
+                  identityReview: false,
+                  missingPagesAccepted: true,
+                },
+              ],
+              exam,
+            ).map((s) => (
+              <div key={s.name}>
+                <span>{s.name}</span>
+                <strong>{s.students[0]?.percentage.toFixed(1) || 0}%</strong>
+                <small>
+                  {s.students[0]?.score || 0} / {s.maximum}
+                </small>
+              </div>
+            ))}
+          </div>
+        ) : null}
         {flagged.length > 0 && (
           <div className="detail-review-banner">
             <CircleAlert size={17} />
@@ -497,7 +654,7 @@ export function StudentDetail({
               </span>
             </div>
             <div>
-              {OPTIONS.map((o) => (
+              {getOptions(exam).map((o) => (
                 <button
                   className={answers[activeQuestion] === o ? "selected" : ""}
                   key={o}
@@ -524,6 +681,22 @@ export function StudentDetail({
         </p>
       </div>
       <div className="modal-footer detail-footer">
+        {onDelete && (
+          <button
+            className="text-button danger-text"
+            onClick={() => {
+              if (
+                confirm(
+                  "Delete this student's result for this assessment? The student register and their other assessment results will be kept. Download a backup first if needed.",
+                )
+              )
+                onDelete();
+            }}
+          >
+            <Trash2 size={15} />
+            Delete result
+          </button>
+        )}
         <button
           className="button button-secondary"
           onClick={() => {
@@ -535,10 +708,29 @@ export function StudentDetail({
           }}
         >
           <ArrowDownToLine size={15} />
-          Export result
+          Export CSV
         </button>
+        {workspace && (
+          <button
+            className="button button-secondary"
+            disabled={pdfBusy || dirty}
+            onClick={async () => {
+              setPDFBusy(true);
+              try {
+                await studentPDF(workspace, exam, result, allResults);
+              } catch (e) {
+                toast(e instanceof Error ? e.message : "PDF export failed.");
+              } finally {
+                setPDFBusy(false);
+              }
+            }}
+          >
+            <ArrowDownToLine size={15} />
+            {pdfBusy ? "Preparing…" : "PDF report card"}
+          </button>
+        )}
         <div>
-          <button className="button button-secondary" onClick={onClose}>
+          <button className="button button-secondary" onClick={close}>
             Close
           </button>
           <button

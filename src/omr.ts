@@ -1,33 +1,58 @@
-import { OPTIONS } from "./data";
+import QRCode from "qrcode";
+import { OPTIONS, getOptions } from "./data";
 import type { Exam, Option } from "./data";
+import {
+  DEFAULT_ANCHORS,
+  getLayout,
+  layoutBubble,
+  pageCount,
+  pageQuestionCount,
+  sheetSignature,
+  WIDTH,
+  HEIGHT,
+} from "./layout";
 
-export const SHEET_WIDTH = 1240;
-export const SHEET_HEIGHT = 1754;
-export const MARKERS = [
-  { x: 55, y: 55 },
-  { x: 1185, y: 55 },
-  { x: 1185, y: 1699 },
-  { x: 55, y: 1699 },
-];
-export function bubbleLayout(question: number, count: number) {
-  const columns = count > 60 ? 4 : 2;
-  const rows = Math.ceil(count / columns);
-  const column = Math.floor(question / rows);
-  const row = question % rows;
-  const columnWidth = 1100 / columns;
-  const y = 400 + row * Math.min(46, 1160 / Math.max(1, rows - 1));
-  const start = 80 + columnWidth * column;
+import { loadSheetImage } from "./sheetImages";
+
+export const SHEET_WIDTH = WIDTH,
+  SHEET_HEIGHT = HEIGHT;
+export const MARKERS = DEFAULT_ANCHORS;
+export function bubbleLayout(question: number, count: number, optionCount = 4) {
+  const columns = count > 60 ? 4 : 2,
+    rows = Math.ceil(count / columns),
+    column = Math.floor(question / rows),
+    row = question % rows,
+    columnWidth = 1100 / columns;
+  const y = 400 + row * Math.min(46, 1160 / Math.max(1, rows - 1)),
+    start = 80 + columnWidth * column;
   return {
     y,
     labelX: start + 10,
     radius: columns === 4 ? 11 : 15,
-    xs: OPTIONS.map(
+    xs: Array.from(
+      { length: optionCount },
       (_, i) =>
-        start + (columns === 4 ? 76 : 130) + i * (columns === 4 ? 42 : 79),
+        start +
+        (columns === 4 ? 76 : 130) +
+        i *
+          (columns === 4
+            ? optionCount === 5
+              ? 34
+              : 42
+            : optionCount === 5
+              ? 63
+              : 79),
     ),
   };
 }
-export function createSheet(
+const isModern = (exam: Exam) =>
+  !!exam.layout || exam.optionCount === 5 || exam.questions > 100;
+export function questionPosition(q: number, exam: Exam, page = 0) {
+  return isModern(exam)
+    ? layoutBubble(q, exam)
+    : bubbleLayout(q, pageQuestionCount(exam, page), getOptions(exam).length);
+}
+function legacySheet(
   exam: Exam,
   answers?: (Option | null)[],
   name = "",
@@ -83,7 +108,7 @@ export function createSheet(
     const l = bubbleLayout(col * rows, exam.questions);
     ctx.font = "bold 17px sans-serif";
     ctx.fillStyle = "#444";
-    OPTIONS.forEach((opt, i) => {
+    getOptions(exam).forEach((opt, i) => {
       ctx.textAlign = "center";
       ctx.fillText(opt, l.xs[i], 369);
     });
@@ -122,19 +147,197 @@ export function createSheet(
   ctx.fillText(`MARKLY · ${exam.id.toUpperCase()}`, 1155, 1681);
   return canvas;
 }
-export function downloadTemplate(exam: Exam) {
-  const link = document.createElement("a");
-  link.download = `markly-${exam.questions}q-${exam.id}.png`;
-  link.href = createSheet(exam).toDataURL("image/png");
-  link.click();
+
+export async function createSheet(
+  exam: Exam,
+  answers?: (Option | null)[],
+  name = "",
+  roll = "",
+  page = 0,
+): Promise<HTMLCanvasElement> {
+  if (!isModern(exam)) return legacySheet(exam, answers, name, roll);
+  const l = getLayout(exam),
+    canvas = document.createElement("canvas");
+  const logos = new Map(
+    await Promise.all(
+      l.fields
+        .filter((f) => f.visible && f.type === "logo" && f.image)
+        .map(async (f) => [f.id, await loadSheetImage(f.image!)] as const),
+    ),
+  );
+  canvas.width = WIDTH;
+  canvas.height = HEIGHT;
+  const ctx = canvas.getContext("2d")!;
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, WIDTH, HEIGHT);
+  ctx.fillStyle = "#111";
+  if (l.anchorMode === "markers")
+    l.anchors.forEach((p) => ctx.fillRect(p.x - 17, p.y - 17, 34, 34));
+  const vars: Record<string, string> = {
+    exam: exam.title,
+    subject: exam.subject,
+    name: name || "________________________________",
+    roll: roll || "____________",
+    questions: String(exam.questions),
+    page: String(page + 1),
+    pages: String(pageCount(exam)),
+  };
+  l.fields
+    .filter((f) => f.visible)
+    .forEach((f) => {
+      ctx.save();
+      ctx.fillStyle = "#111";
+      ctx.strokeStyle = "#bbb";
+      if (f.type === "line") {
+        ctx.fillStyle = "#bbb";
+        ctx.fillRect(f.x, f.y, f.width, Math.max(1, f.height));
+      } else if (f.type === "qr") {
+        const qr = QRCode.create(
+            JSON.stringify({
+              m: 2,
+              e: exam.id,
+              p: page,
+              n: pageCount(exam),
+              q: exam.questions,
+              o: getOptions(exam).length,
+              l: sheetSignature(exam),
+              r: roll,
+            }),
+            { errorCorrectionLevel: "M" },
+          ),
+          size = qr.modules.size,
+          unit = Math.min(f.width, f.height) / (size + 8);
+        ctx.fillStyle = "#fff";
+        ctx.fillRect(f.x, f.y, f.width, f.height);
+        ctx.fillStyle = "#000";
+        for (let r = 0; r < size; r++)
+          for (let c = 0; c < size; c++)
+            if (qr.modules.get(r, c))
+              ctx.fillRect(
+                f.x + (c + 4) * unit,
+                f.y + (r + 4) * unit,
+                unit + 0.15,
+                unit + 0.15,
+              );
+      } else if (f.type === "logo") {
+        const image = logos.get(f.id);
+        if (image) {
+          const scale = Math.min(
+              f.width / image.naturalWidth,
+              f.height / image.naturalHeight,
+            ),
+            width = image.naturalWidth * scale,
+            height = image.naturalHeight * scale;
+          ctx.drawImage(
+            image,
+            f.x + (f.width - width) / 2,
+            f.y + (f.height - height) / 2,
+            width,
+            height,
+          );
+        }
+      } else {
+        ctx.font = `${f.bold ? "bold " : ""}${f.fontSize}px sans-serif`;
+        ctx.textBaseline = "top";
+        const text = f.text.replace(/\{(\w+)\}/g, (_, key) => vars[key] || "");
+        const lines = text.split("\n");
+        lines.forEach((line, i) => {
+          if (i * f.fontSize * 1.25 < f.height)
+            ctx.fillText(line, f.x, f.y + i * f.fontSize * 1.25, f.width);
+        });
+      }
+      ctx.restore();
+    });
+  const count = pageQuestionCount(exam, page),
+    options = getOptions(exam),
+    rows = Math.ceil(l.questionsPerPage / l.columns);
+  for (let col = 0; col < l.columns; col++) {
+    const p = layoutBubble(col * rows, exam);
+    ctx.font = "bold 16px sans-serif";
+    ctx.textAlign = "center";
+    options.forEach((o, i) => ctx.fillText(o, p.xs[i], l.startY - 31));
+  }
+  ctx.textAlign = "left";
+  for (let q = 0; q < count; q++) {
+    const p = layoutBubble(q, exam);
+    ctx.font = "17px sans-serif";
+    ctx.fillStyle = "#222";
+    ctx.fillText(
+      String(page * l.questionsPerPage + q + 1).padStart(2, "0"),
+      p.labelX,
+      p.y + 5,
+    );
+    p.xs.forEach((x, i) => {
+      ctx.beginPath();
+      if (l.bubbleShape === "square")
+        ctx.rect(x - p.radius, p.y - p.radius, p.radius * 2, p.radius * 2);
+      else ctx.arc(x, p.y, p.radius, 0, Math.PI * 2);
+      ctx.strokeStyle = "#333";
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      if (answers?.[page * l.questionsPerPage + q] === options[i]) {
+        ctx.fillStyle = "#111";
+        ctx.fill();
+      }
+    });
+  }
+  return canvas;
+}
+export async function downloadTemplate(exam: Exam, page = 0) {
+  const a = document.createElement("a");
+  a.download = `markly-${exam.id}-page-${page + 1}.png`;
+  a.href = (await createSheet(exam, undefined, "", "", page)).toDataURL(
+    "image/png",
+  );
+  a.click();
+}
+export async function templatePDF(
+  exam: Exam,
+  student?: { name: string; roll: string },
+  answers?: (Option | null)[],
+) {
+  const { jsPDF } = await import("jspdf");
+  const doc = new jsPDF({ unit: "mm", format: "a4", compress: true });
+  for (let p = 0; p < pageCount(exam); p++) {
+    if (p) doc.addPage();
+    const canvas = await createSheet(
+      exam,
+      answers,
+      student?.name || "",
+      student?.roll || "",
+      p,
+    );
+    doc.addImage(
+      canvas.toDataURL("image/png"),
+      "PNG",
+      0,
+      0,
+      210,
+      297,
+      undefined,
+      "FAST",
+    );
+  }
+  return doc;
+}
+export async function downloadTemplatePDF(
+  exam: Exam,
+  student?: { name: string; roll: string },
+) {
+  const doc = await templatePDF(exam, student);
+  doc.save(`markly-omr-${exam.id}${student ? `-${student.roll}` : ""}.pdf`);
 }
 interface Point {
   x: number;
   y: number;
 }
 // Four dark registration squares make scale and perspective independent of camera resolution.
-export function findMarkers(data: ImageData): Point[] {
+export function findMarkers(
+  data: ImageData,
+  reference: Point[] = MARKERS,
+): Point[] {
   const { width, height } = data;
+  const expectedArea = (34 * 34 * width * height) / (WIDTH * HEIGHT);
   const gray = (x: number, y: number) => {
     const i = (y * width + x) * 4;
     return (data.data[i] + data.data[i + 1] + data.data[i + 2]) / 3;
@@ -145,14 +348,14 @@ export function findMarkers(data: ImageData): Point[] {
     [0.76, 0.76],
     [0, 0.76],
   ];
-  return regions.map(([rx, ry]) => {
+  return regions.map(([rx, ry], corner) => {
     const x0 = Math.floor(rx * width),
       x1 = Math.min(width, x0 + Math.ceil(0.24 * width));
     const y0 = Math.floor(ry * height),
       y1 = Math.min(height, y0 + Math.ceil(0.24 * height));
     const visited = new Uint8Array((x1 - x0) * (y1 - y0));
     const rw = x1 - x0;
-    let best: { point: Point; size: number } | null = null;
+    let best: { point: Point; score: number } | null = null;
     for (let y = y0; y < y1; y++)
       for (let x = x0; x < x1; x++) {
         const idx = (y - y0) * rw + x - x0;
@@ -193,14 +396,22 @@ export function findMarkers(data: ImageData): Point[] {
         }
         const w = maxX - minX + 1,
           h = maxY - minY + 1;
+        const score =
+          Math.abs(Math.log(n / expectedArea)) +
+          5 *
+            Math.hypot(
+              sx / n / width - reference[corner].x / WIDTH,
+              sy / n / height - reference[corner].y / HEIGHT,
+            );
         if (
           n > 35 &&
+          n < expectedArea * 4 &&
           w / h > 0.6 &&
           w / h < 1.65 &&
           n / (w * h) > 0.75 &&
-          (!best || n > best.size)
+          (!best || score < best.score)
         )
-          best = { point: { x: sx / n, y: sy / n }, size: n };
+          best = { point: { x: sx / n, y: sy / n }, score };
       }
     if (!best)
       throw new Error(
@@ -243,63 +454,67 @@ export function perspectiveTransform(from: Point[], to: Point[]) {
     };
   };
 }
-export function analyzeImageData(data: ImageData, exam: Exam) {
-  const markers = findMarkers(data);
-  const map = perspectiveTransform(MARKERS, markers);
+
+function sampleBubbles(
+  data: ImageData,
+  exam: Exam,
+  page: number,
+  map: (x: number, y: number) => Point,
+) {
   const answers: (Option | null)[] = [],
-    flagged: number[] = [];
-  for (let q = 0; q < exam.questions; q++) {
-    const l = bubbleLayout(q, exam.questions);
-    const darkness = l.xs.map((x) => {
-      let dark = 0,
-        total = 0;
-      const r = l.radius * 0.58;
-      for (let sy = -r; sy <= r; sy += 1.5)
-        for (let sx = -r; sx <= r; sx += 1.5) {
-          if (sx * sx + sy * sy > r * r) continue;
-          const p = map(x + sx, l.y + sy);
-          const px = Math.round(p.x),
-            py = Math.round(p.y);
-          if (px < 0 || py < 0 || px >= data.width || py >= data.height)
-            continue;
-          const i = (py * data.width + px) * 4;
-          if ((data.data[i] + data.data[i + 1] + data.data[i + 2]) / 3 < 155)
-            dark++;
-          total++;
-        }
-      return total ? dark / total : 0;
-    });
+    flagged: number[] = [],
+    confidences: number[] = [];
+  for (let q = 0; q < pageQuestionCount(exam, page); q++) {
+    const l = questionPosition(q, exam, page),
+      darkness = l.xs.map((x) => {
+        let dark = 0,
+          total = 0;
+        const r = l.radius * 0.58;
+        for (let sy = -r; sy <= r; sy += 1.5)
+          for (let sx = -r; sx <= r; sx += 1.5) {
+            if (sx * sx + sy * sy > r * r) continue;
+            const p = map(x + sx, l.y + sy),
+              px = Math.round(p.x),
+              py = Math.round(p.y);
+            if (px < 0 || py < 0 || px >= data.width || py >= data.height)
+              continue;
+            const i = (py * data.width + px) * 4;
+            if ((data.data[i] + data.data[i + 1] + data.data[i + 2]) / 3 < 155)
+              dark++;
+            total++;
+          }
+        return total ? dark / total : 0;
+      });
     const filled = darkness
       .map((v, i) => ({ v, i }))
-      .filter((a) => a.v >= 0.52);
-    if (filled.length === 1) answers.push(OPTIONS[filled[0].i]);
-    else {
+      .filter((a) => a.v >= (exam.layout?.threshold || 0.52));
+    if (filled.length === 1) {
+      answers.push(getOptions(exam)[filled[0].i]);
+      confidences.push(filled[0].v);
+    } else {
       answers.push(null);
+      confidences.push(filled.length ? 0 : 1 - Math.max(...darkness));
       if (filled.length > 1 || darkness.some((v) => v > 0.22)) flagged.push(q);
     }
   }
+  return {
+    answers,
+    flagged,
+    confidence: confidences.length
+      ? (confidences.reduce((s, v) => s + v, 0) / confidences.length) * 100
+      : 0,
+  };
+}
+export function analyzeAlignedImageData(data: ImageData, exam: Exam, page = 0) {
+  return sampleBubbles(data, exam, page, (x, y) => ({ x, y }));
+}
+export function analyzeImageData(data: ImageData, exam: Exam, page = 0) {
+  const markers = findMarkers(data, exam.layout?.anchors || MARKERS),
+    map = perspectiveTransform(exam.layout?.anchors || MARKERS, markers);
+  const { answers, flagged } = sampleBubbles(data, exam, page, map);
   return { answers, flagged };
 }
-export async function scanFile(file: File, exam: Exam) {
-  if (file.size > 20 * 1024 * 1024)
-    throw new Error(
-      "This image is larger than 20 MB. Please resize it and try again.",
-    );
-  const image = await createImageBitmap(file);
-  try {
-    const scale = Math.min(1, 1800 / Math.max(image.width, image.height));
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.round(image.width * scale);
-    canvas.height = Math.round(image.height * scale);
-    const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
-    ctx.fillStyle = "#fff";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
-    return analyzeImageData(
-      ctx.getImageData(0, 0, canvas.width, canvas.height),
-      exam,
-    );
-  } finally {
-    image.close();
-  }
+export async function scanFile(file: File, exam: Exam, page = 0) {
+  const { scanPageFile } = await import("./scanEngine");
+  return scanPageFile(file, exam, { pageIndex: page, ocr: false });
 }

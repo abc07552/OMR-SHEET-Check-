@@ -1,0 +1,16 @@
+node_modules
+.git
+docs
+dist
+.cache
+.data
+.env
+.env.*
+!.env.example
+data
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.local
+*.tsbuildinfo
+public/vendor

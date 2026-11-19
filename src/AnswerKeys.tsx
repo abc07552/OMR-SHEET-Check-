@@ -15,8 +15,8 @@ import {
   Sparkles,
 } from "lucide-react";
 import type { Exam, Option, Page, Workspace } from "./data";
-import { OPTIONS } from "./data";
-import { downloadTemplate } from "./omr";
+import { getOptions } from "./data";
+import { downloadTemplatePDF } from "./omr";
 import { Modal, PageHeading, SavedIndicator, Select } from "./components";
 import { ExamBar } from "./Overview";
 interface Props {
@@ -46,8 +46,10 @@ export default function AnswerKeys({
   const [paste, setPaste] = useState("");
   const [pasteError, setPasteError] = useState("");
   const [clearOpen, setClearOpen] = useState(false);
+  const [keyPage, setKeyPage] = useState(0);
   useEffect(() => {
     setDraft({ ...exam, answers: [...exam.answers] });
+    setKeyPage(0);
   }, [exam]);
   const dirty = JSON.stringify(draft) !== JSON.stringify(exam);
   const completed = draft.answers.filter(Boolean).length;
@@ -57,6 +59,7 @@ export default function AnswerKeys({
       !draft.subject.trim() ||
       !/^\d{4}-\d{2}-\d{2}$/.test(draft.date) ||
       !Number.isFinite(Date.parse(draft.date)) ||
+      new Date(draft.date).toISOString().slice(0, 10) !== draft.date ||
       !Number.isFinite(draft.marksCorrect) ||
       !Number.isFinite(draft.negativeMarks) ||
       !Number.isFinite(draft.passPercentage) ||
@@ -68,6 +71,33 @@ export default function AnswerKeys({
       draft.passPercentage > 100
     ) {
       toast("Please check the assessment details and scoring rules.");
+      return;
+    }
+    const covered = new Set<number>();
+    for (const s of draft.subjects || []) {
+      if (
+        !s.name.trim() ||
+        !Number.isInteger(s.from) ||
+        !Number.isInteger(s.to) ||
+        s.from < 1 ||
+        s.to < s.from ||
+        s.to > draft.questions
+      ) {
+        toast("Check the subject names and question ranges.");
+        return;
+      }
+      for (let q = s.from; q <= s.to; q++) {
+        if (covered.has(q)) {
+          toast("Subject question ranges must not overlap.");
+          return;
+        }
+        covered.add(q);
+      }
+    }
+    if (draft.subjects?.length && covered.size !== draft.questions) {
+      toast(
+        "Subject ranges must cover every question for complete subject analytics.",
+      );
       return;
     }
     onSave({
@@ -95,10 +125,10 @@ export default function AnswerKeys({
       .split("");
     if (
       values.length !== draft.questions ||
-      values.some((v) => !OPTIONS.includes(v as Option))
+      values.some((v) => !getOptions(draft).includes(v as Option))
     ) {
       setPasteError(
-        `Enter exactly ${draft.questions} answers using only A, B, C and D. You entered ${values.length}.`,
+        `Enter exactly ${draft.questions} answers using only ${getOptions(draft).join(", ")}. You entered ${values.length}.`,
       );
       return;
     }
@@ -167,30 +197,57 @@ export default function AnswerKeys({
               Clear
             </button>
           </div>
-          <div className="answer-key-grid">
-            {draft.answers.map((answer, i) => (
-              <div
-                className={`answer-key-question ${answer ? "filled" : ""}`}
-                key={i}
+          {draft.questions > 50 && (
+            <div className="key-page-controls">
+              <span>
+                Questions {keyPage * 50 + 1}–
+                {Math.min(draft.questions, (keyPage + 1) * 50)}
+              </span>
+              <Select
+                aria-label="Answer key question range"
+                value={keyPage}
+                onChange={(e) => setKeyPage(Number(e.target.value))}
               >
-                <span className="question-number">
-                  {String(i + 1).padStart(2, "0")}
-                </span>
-                <div>
-                  {OPTIONS.map((o) => (
-                    <button
-                      key={o}
-                      aria-label={`Question ${i + 1}, option ${o}`}
-                      aria-pressed={answer === o}
-                      className={answer === o ? "selected" : ""}
-                      onClick={() => choose(i, o)}
-                    >
-                      {o}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ))}
+                {Array.from(
+                  { length: Math.ceil(draft.questions / 50) },
+                  (_, p) => (
+                    <option value={p} key={p}>
+                      {p * 50 + 1}–{Math.min(draft.questions, (p + 1) * 50)}
+                    </option>
+                  ),
+                )}
+              </Select>
+            </div>
+          )}
+          <div className="answer-key-grid">
+            {draft.answers
+              .slice(keyPage * 50, (keyPage + 1) * 50)
+              .map((answer, localIndex) => {
+                const i = keyPage * 50 + localIndex;
+                return (
+                  <div
+                    className={`answer-key-question ${answer ? "filled" : ""}`}
+                    key={i}
+                  >
+                    <span className="question-number">
+                      {String(i + 1).padStart(2, "0")}
+                    </span>
+                    <div>
+                      {getOptions(draft).map((o) => (
+                        <button
+                          key={o}
+                          aria-label={`Question ${i + 1}, option ${o}`}
+                          aria-pressed={answer === o}
+                          className={answer === o ? "selected" : ""}
+                          onClick={() => choose(i, o)}
+                        >
+                          {o}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
           </div>
           <div className="key-footer">
             <SavedIndicator dirty={dirty} />
@@ -310,6 +367,102 @@ export default function AnswerKeys({
               </div>
             </div>
           </section>
+          <section className="card subject-range-editor">
+            <div className="card-heading">
+              <div>
+                <h2>Subjects & sections</h2>
+                <p>Question ranges power subject analytics.</p>
+              </div>
+            </div>
+            <div className="form-fields">
+              {(draft.subjects || []).map((s, i) => (
+                <div className="subject-range" key={i}>
+                  <label>
+                    Subject
+                    <input
+                      aria-label={`Subject ${i + 1} name`}
+                      value={s.name}
+                      maxLength={60}
+                      onChange={(e) =>
+                        setDraft((d) => ({
+                          ...d,
+                          subjects: d.subjects!.map((v, j) =>
+                            j === i ? { ...v, name: e.target.value } : v,
+                          ),
+                        }))
+                      }
+                    />
+                  </label>
+                  <div className="form-two-columns">
+                    {(["from", "to"] as const).map((k) => (
+                      <label key={k}>
+                        {k === "from" ? "First question" : "Last question"}
+                        <input
+                          aria-label={`Subject ${i + 1} ${k}`}
+                          type="number"
+                          min={1}
+                          max={draft.questions}
+                          value={s[k]}
+                          onChange={(e) =>
+                            setDraft((d) => ({
+                              ...d,
+                              subjects: d.subjects!.map((v, j) =>
+                                j === i
+                                  ? { ...v, [k]: Number(e.target.value) }
+                                  : v,
+                              ),
+                            }))
+                          }
+                        />
+                      </label>
+                    ))}
+                  </div>
+                  <button
+                    className="text-button danger-text"
+                    onClick={() =>
+                      setDraft((d) => ({
+                        ...d,
+                        subjects: d.subjects!.filter((_, j) => j !== i),
+                      }))
+                    }
+                  >
+                    Remove subject
+                  </button>
+                </div>
+              ))}
+              <button
+                className="button button-secondary button-small"
+                disabled={(draft.subjects?.length || 0) >= 30}
+                onClick={() =>
+                  setDraft((d) => ({
+                    ...d,
+                    subjects: [
+                      ...(d.subjects || []),
+                      {
+                        name: "",
+                        from: (d.subjects?.at(-1)?.to || 0) + 1,
+                        to: d.questions,
+                      },
+                    ],
+                  }))
+                }
+              >
+                <Plus size={14} />
+                Add subject range
+              </button>
+              <p className="small muted">
+                Leave empty for a single-subject exam. Otherwise cover all
+                questions with non-overlapping ranges.
+              </p>
+            </div>
+          </section>
+          <button
+            className="button button-secondary full-width"
+            onClick={() => navigate("templates")}
+          >
+            Open layout studio
+            <ArrowRight size={14} />
+          </button>
           <section className="key-tip">
             <Sparkles size={20} />
             <h3>One key. Endless possibilities.</h3>
@@ -320,7 +473,9 @@ export default function AnswerKeys({
           </section>
           <button
             className="button button-secondary full-width"
-            onClick={() => downloadTemplate(exam)}
+            onClick={() => {
+              void downloadTemplatePDF(exam).catch((e) => toast(e.message));
+            }}
           >
             <ArrowDownToLine size={16} />
             Download OMR template
@@ -336,7 +491,7 @@ export default function AnswerKeys({
           </button>
           <p className="aside-caption">
             <ShieldCheck size={12} />
-            Saved securely on your device
+            Changes follow your workspace storage mode
           </p>
         </aside>
       </div>
@@ -438,18 +593,27 @@ export function NewExamModal({
   const [title, setTitle] = useState("");
   const [subject, setSubject] = useState("Physics");
   const [count, setCount] = useState("50");
+  const [options, setOptions] = useState<4 | 5>(5);
   return (
     <Modal title="A fresh start, one answer at a time." onClose={onClose}>
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          if (!title.trim() || !subject.trim()) return;
+          if (
+            !title.trim() ||
+            !subject.trim() ||
+            !Number.isInteger(Number(count)) ||
+            Number(count) < 1 ||
+            Number(count) > 500
+          )
+            return;
           onCreate({
             id: `exam-${crypto.randomUUID().slice(0, 8)}`,
             title: title.trim(),
             subject: subject.trim(),
             date: new Date().toISOString().slice(0, 10),
             questions: Number(count),
+            optionCount: options,
             marksCorrect: 2,
             negativeMarks: 0,
             passPercentage: 40,
@@ -489,18 +653,31 @@ export function NewExamModal({
               </label>
               <label>
                 Number of questions
-                <Select
+                <input
+                  type="number"
+                  required
+                  min="1"
+                  max="500"
+                  step="1"
                   value={count}
                   onChange={(e) => setCount(e.target.value)}
-                >
-                  {[10, 20, 30, 40, 50, 60, 100].map((n) => (
-                    <option key={n} value={n}>
-                      {n} questions
-                    </option>
-                  ))}
-                </Select>
+                />
               </label>
             </div>
+            <label>
+              Answer options
+              <Select
+                value={options}
+                onChange={(e) => setOptions(Number(e.target.value) as 4 | 5)}
+              >
+                <option value={4}>A–D · four options</option>
+                <option value={5}>A–E · five options</option>
+              </Select>
+            </label>
+            <p className="small muted">
+              Up to 500 questions. Exams longer than 100 questions print across
+              multiple identified pages.
+            </p>
           </div>
         </div>
         <div className="modal-footer">

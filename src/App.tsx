@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   ArrowDownToLine,
   ArrowRight,
@@ -9,105 +17,171 @@ import {
   Check,
   CheckCheck,
   ChevronDown,
-  ChevronsUpDown,
+  CircleAlert,
   CircleHelp,
+  Cloud,
   Command,
+  DatabaseBackup,
   FileChartColumn,
   GraduationCap,
+  HardDrive,
   KeyRound,
   LayoutDashboard,
-  LifeBuoy,
+  LoaderCircle,
+  LogOut,
   Menu,
   Plus,
+  RefreshCw,
   ScanLine,
   Search,
   Settings2,
   ShieldCheck,
   Sparkles,
+  Trophy,
   Users,
   X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import type { Exam, Page, Result, Workspace } from "./data";
-import { downloadFile, initials, loadWorkspace, resultsCSV } from "./data";
-import { downloadTemplate } from "./omr";
-import { Avatar, EmptyState, Logo, Modal, SearchInput } from "./components";
-import Overview from "./Overview";
+import type { Exam, Page, Result, School, Workspace } from "./data";
+import {
+  blankWorkspace,
+  downloadFile,
+  enrichWorkspace,
+  gradeResult,
+  initials,
+  mergeSchoolWorkspace,
+  resultsCSV,
+  scopeWorkspace,
+} from "./data";
+import {
+  Avatar,
+  EmptyState,
+  Logo,
+  Modal,
+  SearchInput,
+  Select,
+} from "./components";
+import { api, useSession, useWorkspaceStore } from "./session";
+import Auth from "./Auth";
+import Dashboard from "./Dashboard";
 import AnswerKeys, { NewExamModal } from "./AnswerKeys";
-import Scanner from "./Scanner";
-import Students, { StudentDetail } from "./Students";
-import Analytics from "./Analytics";
-import Reports, { PrintReport } from "./Reports";
-import Settings from "./Settings";
-
-const pages: { id: Page; label: string; icon: LucideIcon }[] = [
-  { id: "overview", label: "Overview", icon: LayoutDashboard },
-  { id: "scanner", label: "Scan sheets", icon: ScanLine },
-  { id: "keys", label: "Answer keys", icon: KeyRound },
-  { id: "students", label: "Students", icon: Users },
-  { id: "analytics", label: "Analytics", icon: ChartNoAxesCombined },
-  { id: "reports", label: "Reports", icon: FileChartColumn },
-  { id: "settings", label: "Settings", icon: Settings2 },
+import { StudentDetail } from "./Students";
+import { PrintReport } from "./Reports";
+const Scanner = lazy(() => import("./Scanner")),
+  Roster = lazy(() => import("./Roster")),
+  Analytics = lazy(() => import("./Analytics")),
+  Reports = lazy(() => import("./Reports")),
+  Templates = lazy(() => import("./Templates")),
+  Leaderboard = lazy(() => import("./Leaderboard")),
+  Settings = lazy(() => import("./Settings")),
+  Backups = lazy(() => import("./Backups")),
+  Administration = lazy(() => import("./Administration"));
+const pages: { id: Page; label: string; icon: LucideIcon; group: number }[] = [
+  { id: "overview", label: "Overview", icon: LayoutDashboard, group: 0 },
+  { id: "scanner", label: "Scan sheets", icon: ScanLine, group: 0 },
+  { id: "keys", label: "Answer keys", icon: KeyRound, group: 0 },
+  { id: "templates", label: "Layout studio", icon: ScanLine, group: 0 },
+  { id: "students", label: "Students", icon: Users, group: 0 },
+  {
+    id: "analytics",
+    label: "Deep analytics",
+    icon: ChartNoAxesCombined,
+    group: 1,
+  },
+  { id: "leaderboard", label: "Leaderboard", icon: Trophy, group: 1 },
+  {
+    id: "reports",
+    label: "Reports & exports",
+    icon: FileChartColumn,
+    group: 1,
+  },
+  { id: "backups", label: "Backups", icon: DatabaseBackup, group: 2 },
+  { id: "administration", label: "Team & access", icon: ShieldCheck, group: 2 },
+  { id: "settings", label: "Settings", icon: Settings2, group: 2 },
 ];
-function currentPage(): Page {
-  const hash = window.location.hash.slice(1);
-  return pages.some((p) => p.id === hash) ? (hash as Page) : "overview";
-}
+const hashPage = (): Page =>
+  pages.find((p) => p.id === location.hash.slice(1))?.id || "overview";
 export default function App() {
-  const [workspace, setWorkspace] = useState<Workspace>(loadWorkspace);
-  const [page, setPage] = useState<Page>(currentPage);
-  const [examId, setExamId] = useState(
-    () => workspace.exams[workspace.exams.length - 1].id,
+  const session = useSession();
+  if (session.phase === "checking")
+    return (
+      <div className="initial-loader">
+        <Logo />
+        <LoaderCircle className="spinning" size={25} />
+        <p>Finding a little more possibility…</p>
+      </div>
+    );
+  if (session.phase === "login" || session.phase === "setup") return <Auth />;
+  return <WorkspaceApp key={session.phase} />;
+}
+function WorkspaceApp() {
+  const session = useSession(),
+    store = useWorkspaceStore(),
+    { workspace: full, setWorkspace, cloud, status } = store;
+  const schoolId = cloud
+    ? session.activeSchool
+    : full.activeSchoolId || full.schools?.[0]?.id || "school-greenwood";
+  const workspace = useMemo(
+    () => scopeWorkspace(enrichWorkspace(full), schoolId),
+    [full, schoolId],
   );
-  const [student, setStudent] = useState<Result | null>(null);
-  const [question, setQuestion] = useState(1);
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [search, setSearch] = useState("");
-  const [helpOpen, setHelpOpen] = useState(false);
-  const [newExamOpen, setNewExamOpen] = useState(false);
-  const [notificationsOpen, setNotificationsOpen] = useState(false);
-  const [profileOpen, setProfileOpen] = useState(false);
-  const [unread, setUnread] = useState(true);
-  const [mobileOpen, setMobileOpen] = useState(false);
-  const [toastMessage, setToastMessage] = useState<{
-    text: string;
-    id: number;
-  } | null>(null);
+  const [page, setPage] = useState<Page>(hashPage),
+    [examId, setExamId] = useState(() => workspace.exams.at(-1)?.id || ""),
+    [studentId, setStudentId] = useState<string | null>(null),
+    [question, setQuestion] = useState(1),
+    [mobile, setMobile] = useState(false),
+    [searchOpen, setSearchOpen] = useState(false),
+    [search, setSearch] = useState(""),
+    [newExam, setNewExam] = useState(false),
+    [help, setHelp] = useState(false),
+    [notifications, setNotifications] = useState(false),
+    [profile, setProfile] = useState(false),
+    [scanBusy, setScanBusy] = useState(false),
+    [toastMessage, setToastMessage] = useState<{
+      text: string;
+      id: number;
+    } | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
-    undefined,
-  );
-  const exam =
-    workspace.exams.find((e) => e.id === examId) ||
-    workspace.exams[workspace.exams.length - 1];
-  const results = workspace.results.filter((r) => r.examId === exam.id);
-  const isDemo = workspace.results.some((r) => r.source === "demo");
+      undefined,
+    ),
+    exam =
+      workspace.exams.find((e) => e.id === examId) || workspace.exams.at(-1)!,
+    results = workspace.results.filter((r) => r.examId === exam?.id),
+    review = results.filter((r) => gradeResult(r, exam).needsReview),
+    student = workspace.results.find((r) => r.id === studentId),
+    admin =
+      !cloud ||
+      session.user?.memberships.find((m) => m.schoolId === schoolId)?.role ===
+        "admin";
   const toast = useCallback((text: string) => {
     setToastMessage({ text, id: Date.now() });
     clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => setToastMessage(null), 5000);
+    toastTimer.current = setTimeout(() => setToastMessage(null), 6000);
   }, []);
+  useEffect(() => () => clearTimeout(toastTimer.current), []);
   const navigate = (p: Page) => {
+    if (scanBusy) {
+      toast("Finish or stop the current scan before leaving this page.");
+      return;
+    }
     setPage(p);
-    window.location.hash = p;
-    setMobileOpen(false);
-    setProfileOpen(false);
-    setNotificationsOpen(false);
+    location.hash = p;
+    setMobile(false);
+    setProfile(false);
+    setNotifications(false);
     window.scrollTo({ top: 0, behavior: "instant" });
   };
   useEffect(() => {
-    const listener = () => setPage(currentPage());
+    const listener = () => {
+      if (scanBusy) {
+        location.hash = page;
+        return;
+      }
+      setPage(hashPage());
+    };
     window.addEventListener("hashchange", listener);
     return () => window.removeEventListener("hashchange", listener);
-  }, []);
-  useEffect(() => {
-    try {
-      localStorage.setItem("markly-workspace-v1", JSON.stringify(workspace));
-    } catch {
-      toast(
-        "This browser could not save your workspace. Download a backup from Settings to keep your changes.",
-      );
-    }
-  }, [workspace, toast]);
+  }, [scanBusy, page]);
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
@@ -121,471 +195,703 @@ export default function App() {
   useEffect(() => {
     document.title = `${pages.find((p) => p.id === page)?.label || "Overview"} — Markly`;
   }, [page]);
-  const updateExam = (updated: Exam) =>
-    setWorkspace((w) => ({
-      ...w,
-      exams: w.exams.map((e) => (e.id === updated.id ? updated : e)),
-    }));
-  const createExam = (created: Exam) => {
-    setWorkspace((w) => ({ ...w, exams: [...w.exams, created] }));
-    setExamId(created.id);
+  useEffect(() => {
+    setStudentId(null);
+    setExamId(workspace.exams.at(-1)?.id || "");
+  }, [schoolId, store.ready]);
+  const updateScoped = (changed: Workspace) =>
+    setWorkspace((w) =>
+      mergeSchoolWorkspace(
+        enrichWorkspace(w),
+        enrichWorkspace(changed),
+        schoolId,
+      ),
+    );
+  const updateExam = (e: Exam) =>
+    updateScoped({
+      ...workspace,
+      exams: workspace.exams.map((old) => (old.id === e.id ? e : old)),
+    });
+  const createExam = (e: Exam) => {
+    updateScoped({
+      ...workspace,
+      exams: [...workspace.exams, { ...e, schoolId }],
+    });
+    setExamId(e.id);
     navigate("keys");
-    toast("Your new answer key is ready. Let’s add the right answers.");
+    toast("Your new assessment is ready. Add the correct answers to begin.");
   };
   const exportResults = () => {
-    downloadFile(`markly-report-${exam.id}.csv`, resultsCSV(results, exam));
-    toast(
-      `${results.length} student results exported. Find them in your downloads.`,
-    );
+    downloadFile(`markly-results-${exam.id}.csv`, resultsCSV(results, exam));
+    toast(`${results.length} result records exported.`);
   };
-  const openQuestion = (q: number) => {
-    setQuestion(q);
-    navigate("analytics");
+  const switchSchool = (id: string) => {
+    if (scanBusy || status === "saving") {
+      toast("Wait for scanning and saving to finish before switching schools.");
+      return;
+    }
+    if (status === "error" || status === "conflict") {
+      toast(
+        "Resolve the save error or export a backup before switching schools.",
+      );
+      return;
+    }
+    if (cloud) session.setSchool(id);
+    else setWorkspace((w) => ({ ...w, activeSchoolId: id }));
+  };
+  const addSchool = async (s: School) => {
+    if (status !== "saved")
+      throw new Error(
+        "Wait for your current changes to save before adding a school.",
+      );
+    if (cloud) {
+      const data = await api<{ school: School }>("/schools", {
+        method: "POST",
+        body: JSON.stringify(s),
+      });
+      await session.reloadUser();
+      session.setSchool(data.school.id);
+    } else {
+      const fresh = blankWorkspace(s, workspace.teacher);
+      setWorkspace((w) => ({
+        ...w,
+        schools: [...(w.schools || []), s],
+        activeSchoolId: s.id,
+        exams: [...w.exams, ...fresh.exams],
+      }));
+    }
+    toast("A new school workspace is ready.");
+  };
+  const onScans = (fresh: Result[]) => {
+    const ids = new Set(fresh.map((r) => r.id)),
+      students = [...(workspace.students || [])];
+    fresh.forEach((r) => {
+      if (
+        !r.identityReview &&
+        !students.some(
+          (s) =>
+            s.id === r.studentId ||
+            s.roll.toLowerCase() === r.roll.toLowerCase(),
+        )
+      )
+        students.push({
+          id: r.studentId,
+          schoolId,
+          name: r.name,
+          roll: r.roll,
+          section: r.section,
+          classId: workspace.classes?.find((c) => c.name === r.section)?.id,
+          registeredAt: r.createdAt,
+        });
+    });
+    updateScoped({
+      ...workspace,
+      students,
+      results: [
+        ...workspace.results.filter((r) => !ids.has(r.id)),
+        ...fresh.filter((r) => workspace.exams.some((e) => e.id === r.examId)),
+      ],
+    });
+  };
+  const updateResult = (r: Result) => {
+    const known = workspace.students?.find(
+      (s) => s.roll.toLowerCase() === r.roll.toLowerCase(),
+    );
+    const linked = known ? { ...r, studentId: known.id } : r;
+    if (
+      workspace.results.some(
+        (other) =>
+          other.id !== r.id &&
+          other.examId === r.examId &&
+          other.studentId === linked.studentId,
+      )
+    ) {
+      toast(
+        "That student already has a result in this assessment. Use the scanner’s replace-page option to merge a rescan.",
+      );
+      return false;
+    }
+    onScans([linked]);
+    return true;
   };
   const searchResults = workspace.results
-    .filter(
-      (r) =>
-        r.examId === exam.id &&
-        (!search ||
-          `${r.name} ${r.roll}`.toLowerCase().includes(search.toLowerCase())),
-    )
-    .slice(0, 6);
-  const searchExams = workspace.exams
-    .filter(
-      (e) =>
-        search &&
-        `${e.title} ${e.subject}`.toLowerCase().includes(search.toLowerCase()),
-    )
-    .slice(0, 3);
-  const reviewCount = results.filter(
-    (r) => r.flagged.length && !r.confirmed,
-  ).length;
-  const sidebarNav = (p: (typeof pages)[number]) => (
-    <button
-      key={p.id}
-      className={`nav-item ${page === p.id ? "active" : ""}`}
-      onClick={() => navigate(p.id)}
-      aria-current={page === p.id ? "page" : undefined}
-      title={p.label}
-    >
-      <p.icon size={18} strokeWidth={1.7} />
-      <span>{p.label}</span>
-      {p.id === "scanner" && <small className="nav-new">NEW</small>}
-      {page === p.id && <i className="nav-active-dot" />}
-    </button>
-  );
+      .filter(
+        (r) =>
+          (!search ||
+            `${r.name} ${r.roll}`
+              .toLowerCase()
+              .includes(search.toLowerCase())) &&
+          r.examId === exam?.id,
+      )
+      .slice(0, 6),
+    searchExams = search
+      ? workspace.exams
+          .filter((e) =>
+            `${e.title} ${e.subject}`
+              .toLowerCase()
+              .includes(search.toLowerCase()),
+          )
+          .slice(0, 4)
+      : [];
+  if (!store.ready)
+    return (
+      <div className="initial-loader">
+        <Logo />
+        {store.error ? (
+          <>
+            <p role="alert">{store.error}</p>
+            <button
+              className="button button-primary"
+              onClick={() => {
+                void store.reload();
+              }}
+            >
+              Retry connection
+            </button>
+            <button
+              className="button button-secondary"
+              onClick={session.explore}
+            >
+              Open device demo instead
+            </button>
+          </>
+        ) : (
+          <>
+            <LoaderCircle className="spinning" size={25} />
+            <p>Opening your school workspace…</p>
+          </>
+        )}
+      </div>
+    );
   return (
     <>
-      <div className="app-shell">
-        {mobileOpen && (
+      <div className="app-shell v2-shell">
+        {mobile && (
           <button
-            aria-label="Close navigation"
             className="mobile-sidebar-backdrop"
-            onClick={() => setMobileOpen(false)}
+            aria-label="Close navigation"
+            onClick={() => setMobile(false)}
           />
         )}
-        <aside className={`sidebar ${mobileOpen ? "sidebar-open" : ""}`}>
+        <aside className={`sidebar ${mobile ? "sidebar-open" : ""}`}>
           <button
             className="logo-button"
-            onClick={() => navigate("overview")}
             aria-label="Markly home"
+            onClick={() => navigate("overview")}
           >
             <Logo />
+            <span className="brand-edition">INTELLIGENCE</span>
           </button>
-          <button
-            className="workspace-switch"
-            onClick={() => navigate("settings")}
-          >
+          <div className="v2-school-switch">
             <span className="workspace-icon">
-              <GraduationCap size={18} />
+              <GraduationCap size={19} />
             </span>
-            <span>
-              <strong>My workspace</strong>
-              <small>Teacher workspace</small>
-            </span>
-            <ChevronsUpDown size={13} />
-          </button>
-          <div className="nav-section-label nav-label-with-action">
-            <span>WORKSPACE</span>
-            <button
-              aria-label="Create a new answer key"
-              title="New answer key"
-              onClick={() => setNewExamOpen(true)}
-            >
-              <Plus size={12} />
-            </button>
+            <div>
+              <small>YOUR INSTITUTION</small>
+              <Select
+                aria-label="Current school"
+                value={schoolId}
+                onChange={(e) => switchSchool(e.target.value)}
+              >
+                {cloud
+                  ? session.user?.memberships.map((m) => (
+                      <option key={m.schoolId} value={m.schoolId}>
+                        {m.schoolId === schoolId ? workspace.school : m.name}
+                      </option>
+                    ))
+                  : full.schools?.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+              </Select>
+            </div>
           </div>
-          <nav aria-label="Main navigation">
-            {pages.slice(0, 5).map(sidebarNav)}
-          </nav>
-          <div className="nav-section-label tools-label">ORGANISE</div>
-          <nav aria-label="Workspace tools">
-            {pages.slice(5).map(sidebarNav)}
-          </nav>
-          <div className="sidebar-bottom">
-            <div className="sidebar-promo">
-              <div className="promo-art">
-                <span>✳</span>
-                <i />
-                <svg viewBox="0 0 120 54">
-                  <path
-                    d="M8 42C22 6 47 1 60 27s32 12 44-12"
-                    fill="none"
-                    stroke="#5e7f4f"
-                    strokeWidth="1.3"
-                    strokeDasharray="3 4"
-                  />
-                  <path
-                    d="m96 15 10-3-1 11"
-                    fill="none"
-                    stroke="#5e7f4f"
-                    strokeWidth="1.3"
-                  />
-                </svg>
+          {["WORKSPACE", "INSIGHTS", "MANAGE"].map((label, g) => (
+            <div className="v2-nav-group" key={label}>
+              <div className="nav-section-label">
+                <span>{label}</span>
+                {g === 0 && (
+                  <button
+                    aria-label="Create assessment"
+                    onClick={() => setNewExam(true)}
+                  >
+                    <Plus size={13} />
+                  </button>
+                )}
               </div>
+              <nav aria-label={label}>
+                {pages
+                  .filter((p) => p.group === g)
+                  .map((p) => (
+                    <button
+                      key={p.id}
+                      className={`nav-item ${page === p.id ? "active" : ""}`}
+                      onClick={() => navigate(p.id)}
+                      aria-current={page === p.id ? "page" : undefined}
+                    >
+                      <p.icon size={17} strokeWidth={1.7} />
+                      <span>{p.label}</span>
+                      {p.id === "scanner" && (
+                        <small className="nav-new">AI</small>
+                      )}
+                      {page === p.id && <i className="nav-active-dot" />}
+                    </button>
+                  ))}
+              </nav>
+            </div>
+          ))}
+          <div className="sidebar-bottom">
+            <div className="v2-sidebar-promo">
+              <Sparkles size={21} />
               <h3>
-                A little less marking.
-                <br />A lot more meaning.
+                Less marking.
+                <br />
+                More meaning.
               </h3>
               <p>
-                Make room for your next
-                <br />
-                great teaching moment.
+                A little technology.
+                <br />A lot more teaching.
               </p>
-              <button onClick={() => navigate("keys")}>
-                Explore answer keys
+              <button onClick={() => navigate("scanner")}>
+                Make every answer count
                 <ArrowUpRight size={14} />
               </button>
             </div>
-            <button className="sidebar-help" onClick={() => setHelpOpen(true)}>
-              <LifeBuoy size={17} />
-              <span>A little help?</span>
+            <button className="sidebar-help" onClick={() => setHelp(true)}>
+              <CircleHelp size={17} />A little help
               <ArrowUpRight size={14} />
             </button>
             <button
-              className="school-profile"
+              className="sidebar-profile"
               onClick={() => navigate("settings")}
             >
-              <span className="school-avatar">
-                G<span>✳</span>
+              <span className="teacher-avatar">
+                {initials(session.user?.name || workspace.teacher)}
               </span>
               <span>
-                <strong>{workspace.school}</strong>
+                <strong>{session.user?.name || workspace.teacher}</strong>
                 <small>
-                  <i />
-                  {isDemo ? "Demo workspace" : "Local workspace"}
+                  {cloud
+                    ? admin
+                      ? "School administrator"
+                      : "Teacher"
+                    : "Device workspace"}
                 </small>
               </span>
-              <ChevronsUpDown size={13} />
+              <Settings2 size={15} />
             </button>
           </div>
         </aside>
-        <div className="main-shell">
+        <div className="main-area">
           <header className="topbar">
-            <div className="breadcrumb">
+            <div className="topbar-left">
               <button
-                className="mobile-menu icon-button"
+                className="icon-button mobile-menu-button"
                 aria-label="Open navigation"
-                onClick={() => setMobileOpen(true)}
+                onClick={() => setMobile(true)}
               >
-                <Menu size={20} />
+                <Menu size={21} />
               </button>
-              <span className="breadcrumb-workspace">
-                <LayoutDashboard size={15} />
-                <span>Workspace</span>
+              <span className="breadcrumb">
+                Workspace <span>/</span>{" "}
+                <strong>{pages.find((p) => p.id === page)?.label}</strong>
               </span>
-              <span className="breadcrumb-slash">/</span>
-              <strong>{pages.find((p) => p.id === page)?.label}</strong>
             </div>
-            <div className="topbar-actions">
+            <div className="topbar-right">
               <button
-                className="global-search"
-                onClick={() => {
-                  setSearchOpen(true);
-                  setSearch("");
-                }}
+                className="topbar-search"
+                onClick={() => setSearchOpen(true)}
               >
-                <Search size={15} />
-                <span>Search anything...</span>
-                <kbd>⌘ K</kbd>
+                <Search size={16} />
+                <span>Find a little clarity…</span>
+                <kbd>
+                  <Command size={10} />K
+                </kbd>
               </button>
-              <span className="topbar-divider" />
+              <button
+                className={`v2-storage-pill ${status}`}
+                onClick={() => navigate("backups")}
+                title={
+                  cloud
+                    ? "Shared server storage"
+                    : "Device-only storage. No secure accounts or cross-device sync."
+                }
+              >
+                {cloud ? <Cloud size={13} /> : <HardDrive size={13} />}
+                <span>
+                  {status === "saving"
+                    ? "Saving…"
+                    : status === "error" || status === "conflict"
+                      ? "Not saved"
+                      : cloud
+                        ? "Shared workspace"
+                        : "Device mode"}
+                </span>
+                <i />
+              </button>
               <div className="popover-anchor">
                 <button
-                  className={`icon-button notification-button ${notificationsOpen ? "is-open" : ""}`}
+                  className="icon-button notification-button"
                   aria-label="Notifications"
-                  aria-expanded={notificationsOpen}
+                  aria-expanded={notifications}
                   onClick={() => {
-                    setNotificationsOpen((v) => !v);
-                    setProfileOpen(false);
+                    setNotifications((v) => !v);
+                    setProfile(false);
                   }}
                 >
                   <Bell size={18} />
-                  {unread && <i />}
+                  {review.length > 0 && <i />}
                 </button>
-                {notificationsOpen && (
-                  <>
-                    <button
-                      className="popover-dismiss"
-                      tabIndex={-1}
-                      aria-label="Close notifications"
-                      onClick={() => setNotificationsOpen(false)}
-                    />
-                    <div className="popover notifications-popover">
-                      <div className="popover-title">
-                        <strong>Your little updates</strong>
-                        <button
-                          className="text-button"
-                          onClick={() => setUnread(false)}
-                        >
-                          {unread ? (
-                            "Mark all read"
-                          ) : (
-                            <>
-                              <CheckCheck size={13} />
-                              All caught up
-                            </>
-                          )}
-                        </button>
-                      </div>
+                {notifications && (
+                  <div className="popover v2-notifications">
+                    <div className="popover-heading">
+                      <strong>A little heads-up.</strong>
                       <button
-                        className="notification-item"
-                        onClick={() => {
-                          navigate("students");
-                          setUnread(false);
-                        }}
+                        className="icon-button"
+                        aria-label="Close notifications"
+                        onClick={() => setNotifications(false)}
                       >
-                        <span className="stat-icon yellow">
-                          <ScanLine size={17} />
-                        </span>
-                        <span>
-                          <strong>
-                            {reviewCount
-                              ? `${reviewCount} sheets could use your eyes.`
-                              : "Your classroom is all caught up."}
-                          </strong>
-                          <small>
-                            {reviewCount
-                              ? "A quick review turns uncertain marks into clear insights."
-                              : "No answer sheets are waiting for review."}
-                          </small>
-                          <time>In this assessment</time>
-                        </span>
+                        <X size={15} />
                       </button>
-                      <button
-                        className="notification-item"
-                        onClick={() => {
-                          navigate("keys");
-                          setUnread(false);
-                        }}
-                      >
-                        <span className="stat-icon green">
-                          <Sparkles size={17} />
-                        </span>
-                        <span>
-                          <strong>A good day for a fresh perspective.</strong>
-                          <small>
-                            Your workspace is ready. Let’s make every answer
-                            count.
-                          </small>
-                          <time>Welcome to Markly</time>
-                        </span>
-                      </button>
-                      <div className="notification-footer">
-                        A little nudge. Never a distraction.
-                      </div>
                     </div>
-                  </>
+                    <button
+                      onClick={() => {
+                        setNotifications(false);
+                        if (review[0]) setStudentId(review[0].id);
+                        else navigate("scanner");
+                      }}
+                    >
+                      <span className="stat-icon lavender">
+                        <CheckCheck size={17} />
+                      </span>
+                      <span>
+                        <strong>
+                          {review.length
+                            ? `${review.length} results need review`
+                            : "You’re all caught up."}
+                        </strong>
+                        <small>
+                          {review.length
+                            ? "Uncertain marks, identities, or missing pages."
+                            : "Ready for your next assessment."}
+                        </small>
+                      </span>
+                      <ArrowRight size={14} />
+                    </button>
+                    <p>
+                      {cloud
+                        ? "Changes are saved to your school’s server."
+                        : "Device mode is separate from shared school accounts."}
+                    </p>
+                  </div>
                 )}
               </div>
-              <button
-                className="icon-button topbar-help"
-                aria-label="Help and scanning instructions"
-                onClick={() => setHelpOpen(true)}
-              >
-                <CircleHelp size={18} />
-              </button>
               <div className="popover-anchor">
                 <button
                   className="profile-button"
                   aria-label="Your profile"
-                  aria-expanded={profileOpen}
+                  aria-expanded={profile}
                   onClick={() => {
-                    setProfileOpen((v) => !v);
-                    setNotificationsOpen(false);
+                    setProfile((v) => !v);
+                    setNotifications(false);
                   }}
                 >
                   <span className="teacher-avatar">
-                    {initials(workspace.teacher)}
+                    {initials(session.user?.name || workspace.teacher)}
                   </span>
                   <ChevronDown size={12} />
                 </button>
-                {profileOpen && (
-                  <>
-                    <button
-                      className="popover-dismiss"
-                      tabIndex={-1}
-                      aria-label="Close profile menu"
-                      onClick={() => setProfileOpen(false)}
-                    />
-                    <div className="popover profile-popover">
-                      <strong>{workspace.teacher}</strong>
-                      <span>Educator · {workspace.school}</span>
-                      <button onClick={() => navigate("settings")}>
-                        <Settings2 size={15} />
-                        Workspace settings
-                      </button>
+                {profile && (
+                  <div className="popover profile-popover">
+                    <strong>{session.user?.name || workspace.teacher}</strong>
+                    <span>
+                      {cloud ? session.user?.email : "Device-only workspace"}
+                    </span>
+                    <button onClick={() => navigate("settings")}>
+                      <Settings2 size={15} />
+                      Workspace settings
+                    </button>
+                    <button onClick={() => navigate("administration")}>
+                      <ShieldCheck size={15} />
+                      Team & access
+                    </button>
+                    {cloud ? (
                       <button
-                        onClick={() => {
-                          setProfileOpen(false);
-                          setHelpOpen(true);
+                        onClick={async () => {
+                          if (
+                            status !== "saved" &&
+                            !confirm(
+                              "Some changes are not saved. Export an unsaved-workspace backup first if you need them. Sign out and discard these changes?",
+                            )
+                          )
+                            return;
+                          try {
+                            await session.logout();
+                          } catch (e) {
+                            toast(
+                              e instanceof Error
+                                ? e.message
+                                : "Sign-out failed.",
+                            );
+                          }
                         }}
                       >
-                        <CircleHelp size={15} />
-                        Help & getting started
+                        <LogOut size={15} />
+                        Sign out
                       </button>
-                      <small>
-                        <ShieldCheck size={12} />
-                        Private, local workspace
-                      </small>
-                    </div>
-                  </>
+                    ) : session.available ? (
+                      <button onClick={session.openLogin}>
+                        <LogOut size={15} />
+                        Secure school sign-in
+                      </button>
+                    ) : (
+                      <small>Accounts require the Node backend.</small>
+                    )}
+                  </div>
                 )}
               </div>
             </div>
           </header>
-          <main className={`main-content page-${page}`} key={page}>
-            {page === "overview" && (
-              <Overview
-                workspace={workspace}
-                exam={exam}
-                results={results}
-                setExamId={setExamId}
-                navigate={navigate}
-                onOpen={setStudent}
-                onExport={exportResults}
-                onQuestion={openQuestion}
-              />
+          <main className={`main-content page-${page}`}>
+            {(store.error || status === "conflict") && (
+              <div className="v2-notice warning" role="alert">
+                <CircleAlert size={18} />
+                <div>
+                  <strong>
+                    {status === "conflict"
+                      ? "Another session changed this workspace."
+                      : "Your data needs attention."}
+                  </strong>
+                  <p>{store.error}</p>
+                </div>
+                <button
+                  className="button button-secondary button-small"
+                  onClick={() =>
+                    downloadFile(
+                      "markly-unsaved-workspace.json",
+                      JSON.stringify(full),
+                      "application/json",
+                    )
+                  }
+                >
+                  <ArrowDownToLine size={14} />
+                  Export unsaved data
+                </button>
+                {status === "conflict" ? (
+                  <button
+                    className="button button-secondary button-small"
+                    onClick={() => {
+                      if (
+                        confirm(
+                          "Reload the server version? Unsaved changes will be discarded. Export them first.",
+                        )
+                      )
+                        void store.reload();
+                    }}
+                  >
+                    <RefreshCw size={14} />
+                    Reload
+                  </button>
+                ) : (
+                  <button
+                    className="button button-secondary button-small"
+                    onClick={store.retry}
+                  >
+                    Retry save
+                  </button>
+                )}
+              </div>
             )}
-            {page === "keys" && (
-              <AnswerKeys
-                workspace={workspace}
-                exam={exam}
-                setExamId={setExamId}
-                onSave={updateExam}
-                onCreate={createExam}
-                navigate={navigate}
-                toast={toast}
-              />
+            {workspace.results.some((r) => r.source === "demo") && (
+              <div className="v2-demo-note">
+                <Sparkles size={12} />
+                <span>This workspace includes fictional sample records.</span>
+                <button onClick={() => navigate("settings")}>
+                  Create your own school <ArrowUpRight size={12} />
+                </button>
+              </div>
             )}
-            {page === "scanner" && (
-              <Scanner
-                key={exam.id}
-                workspace={workspace}
-                exam={exam}
-                results={results}
-                setExamId={setExamId}
-                navigate={navigate}
-                onResults={(fresh) =>
-                  setWorkspace((w) => ({
-                    ...w,
-                    results: [
-                      ...w.results,
-                      ...fresh.filter((r) =>
-                        w.exams.some((e) => e.id === r.examId),
-                      ),
-                    ],
-                  }))
-                }
-                onOpen={setStudent}
-                toast={toast}
-              />
-            )}
-            {page === "students" && (
-              <Students
-                workspace={workspace}
-                exam={exam}
-                results={results}
-                setExamId={setExamId}
-                navigate={navigate}
-                onOpen={setStudent}
-                toast={toast}
-              />
-            )}
-            {page === "analytics" && (
-              <Analytics
-                workspace={workspace}
-                exam={exam}
-                results={results}
-                setExamId={setExamId}
-                question={question}
-                setQuestion={setQuestion}
-                toast={toast}
-              />
-            )}
-            {page === "reports" && (
-              <Reports
-                workspace={workspace}
-                exam={exam}
-                results={results}
-                setExamId={setExamId}
-                toast={toast}
-              />
-            )}
-            {page === "settings" && (
-              <Settings
-                workspace={workspace}
-                onUpdate={(data) => {
-                  setWorkspace(data);
-                  if (!data.exams.some((e) => e.id === examId))
-                    setExamId(data.exams[data.exams.length - 1].id);
-                }}
-                toast={toast}
-              />
-            )}
+            <Suspense
+              key={schoolId}
+              fallback={
+                <div className="page-loader">
+                  <LoaderCircle className="spinning" size={24} />
+                  <span>Opening your next perspective…</span>
+                </div>
+              }
+            >
+              {page === "overview" && (
+                <Dashboard
+                  workspace={workspace}
+                  exam={exam}
+                  results={results}
+                  setExamId={setExamId}
+                  navigate={navigate}
+                  onOpen={(r) => setStudentId(r.id)}
+                  onExport={exportResults}
+                  onQuestion={(q) => {
+                    setQuestion(q);
+                    navigate("analytics");
+                  }}
+                />
+              )}
+              {page === "keys" && (
+                <AnswerKeys
+                  workspace={workspace}
+                  exam={exam}
+                  setExamId={setExamId}
+                  onSave={updateExam}
+                  onCreate={createExam}
+                  navigate={navigate}
+                  toast={toast}
+                />
+              )}
+              {page === "templates" && (
+                <Templates
+                  workspace={workspace}
+                  exam={exam}
+                  setExamId={setExamId}
+                  onSave={updateExam}
+                  toast={toast}
+                />
+              )}
+              {page === "scanner" && (
+                <Scanner
+                  key={`${schoolId}-${exam.id}`}
+                  workspace={workspace}
+                  exam={exam}
+                  results={results}
+                  setExamId={setExamId}
+                  navigate={navigate}
+                  onResults={onScans}
+                  onOpen={(r) => setStudentId(r.id)}
+                  toast={toast}
+                  onBusy={setScanBusy}
+                />
+              )}
+              {page === "students" && (
+                <Roster
+                  workspace={workspace}
+                  exam={exam}
+                  results={results}
+                  setExamId={setExamId}
+                  navigate={navigate}
+                  onOpen={(r) => setStudentId(r.id)}
+                  onUpdate={updateScoped}
+                  toast={toast}
+                />
+              )}
+              {page === "analytics" && (
+                <Analytics
+                  workspace={workspace}
+                  exam={exam}
+                  results={results}
+                  setExamId={setExamId}
+                  question={question}
+                  setQuestion={setQuestion}
+                  toast={toast}
+                />
+              )}
+              {page === "leaderboard" && (
+                <Leaderboard
+                  workspace={workspace}
+                  exam={exam}
+                  results={results}
+                  setExamId={setExamId}
+                  onOpen={(r) => setStudentId(r.id)}
+                />
+              )}
+              {page === "reports" && (
+                <Reports
+                  workspace={workspace}
+                  exam={exam}
+                  results={results}
+                  setExamId={setExamId}
+                  toast={toast}
+                />
+              )}
+              {page === "settings" && (
+                <Settings
+                  key={schoolId}
+                  workspace={workspace}
+                  onUpdate={updateScoped}
+                  onAddSchool={addSchool}
+                  navigate={navigate}
+                  toast={toast}
+                />
+              )}
+              {page === "backups" && (
+                <Backups
+                  workspace={cloud ? workspace : full}
+                  onRestore={(data) => setWorkspace(enrichWorkspace(data))}
+                  reload={store.reload}
+                  toast={toast}
+                />
+              )}
+              {page === "administration" && (
+                <Administration workspace={workspace} toast={toast} />
+              )}
+            </Suspense>
+            <footer className="v2-page-footer">
+              <span>
+                markly<span>.</span> <i /> A little more possibility.
+              </span>
+              <span>
+                <span className="live-dot" />
+                {cloud
+                  ? "CONNECTED TO SCHOOL SERVER"
+                  : "PRIVATE DEVICE WORKSPACE"}
+              </span>
+            </footer>
           </main>
         </div>
       </div>
       <PrintReport workspace={workspace} exam={exam} results={results} />
       {student && (
         <StudentDetail
+          key={student.id}
+          workspace={workspace}
           result={student}
           exam={workspace.exams.find((e) => e.id === student.examId)!}
           allResults={workspace.results.filter(
             (r) => r.examId === student.examId,
           )}
-          onClose={() => setStudent(null)}
-          onUpdate={(updated) =>
-            setWorkspace((w) => ({
-              ...w,
-              results: w.results.map((r) =>
-                r.id === updated.id ? updated : r,
-              ),
-            }))
-          }
+          onClose={() => setStudentId(null)}
+          onUpdate={updateResult}
+          onDelete={() => {
+            updateScoped({
+              ...workspace,
+              results: workspace.results.filter((r) => r.id !== student.id),
+            });
+            setStudentId(null);
+            toast(
+              "Assessment result deleted. The student register and other assessments are unchanged.",
+            );
+          }}
           toast={toast}
         />
       )}
-      {newExamOpen && (
+      {newExam && (
         <NewExamModal
-          onClose={() => setNewExamOpen(false)}
-          onCreate={(created) => {
-            createExam(created);
-            setNewExamOpen(false);
+          onClose={() => setNewExam(false)}
+          onCreate={(e) => {
+            createExam(e);
+            setNewExam(false);
           }}
         />
       )}
       {searchOpen && (
         <Modal
-          title="Find a little clarity"
-          onClose={() => setSearchOpen(false)}
+          title="Find a little clarity."
           className="search-modal"
+          onClose={() => setSearchOpen(false)}
         >
           <div className="modal-body">
             <SearchInput
               value={search}
               onChange={setSearch}
-              placeholder="Find a student, roll number, or assessment..."
+              placeholder="Find a student, roll number, or assessment…"
             />
             {searchExams.length > 0 && (
               <>
@@ -615,138 +921,119 @@ export default function App() {
                 </div>
               </>
             )}
-            <p className="search-label">
-              {search ? "STUDENTS IN THIS ASSESSMENT" : "YOUR CLASSROOM"}
-            </p>
+            <p className="search-label">STUDENTS IN THIS ASSESSMENT</p>
             <div className="search-results">
               {searchResults.map((r, i) => (
                 <button
                   key={r.id}
                   onClick={() => {
                     setSearchOpen(false);
-                    setStudent(r);
+                    setStudentId(r.id);
                   }}
                 >
                   <Avatar name={r.name} index={i} />
                   <span>
                     <strong>{r.name}</strong>
                     <small>
-                      Roll {r.roll} · Class {r.section}
+                      {r.roll} · Class {r.section}
                     </small>
                   </span>
                   <ArrowUpRight size={16} />
                 </button>
               ))}
             </div>
-            {!searchResults.length && !searchExams.length && (
+            {!searchExams.length && !searchResults.length && (
               <EmptyState
-                icon={<Search size={25} />}
                 title="Nothing here just yet."
                 description="Try another name, roll number, or assessment."
               />
             )}
           </div>
-          <div className="search-modal-footer">
-            <span>
-              <Command size={12} /> K to open search
-            </span>
-            <span>
-              <kbd>esc</kbd> to close
-            </span>
-          </div>
         </Modal>
       )}
-      {helpOpen && (
+      {help && (
         <Modal
-          title="A little help, a lot of clarity."
-          onClose={() => setHelpOpen(false)}
+          title="A little help. A lot of clarity."
           className="help-modal"
+          onClose={() => setHelp(false)}
         >
           <div className="modal-body">
-            <div className="help-intro">
-              <span className="stat-icon green">
-                <LifeBuoy size={24} />
-              </span>
-              <p>
-                Less time figuring things out.
-                <br />
-                <strong>More time doing what you do best.</strong>
-              </p>
+            <div className="v2-help-step">
+              <span>01</span>
+              <div>
+                <h3>Register your classroom.</h3>
+                <p>
+                  Add a school and classes in Settings. Register students
+                  individually or import CSV / XLSX. Roll numbers must be unique
+                  within a school.
+                </p>
+              </div>
             </div>
-            <details open>
-              <summary>How do I check my first OMR sheet?</summary>
-              <p>
-                1. Open Answer keys and create an assessment.
-                <br />
-                2. Set the correct option for every question and save.
-                <br />
-                3. Download and print the Markly OMR template.
-                <br />
-                4. Upload filled sheets in Scan sheets, then check the student
-                names.
-                <br />
-                5. Select Check sheets. Your results and analysis are ready.
-              </p>
-            </details>
-            <details>
-              <summary>Can I scan any OMR format?</summary>
-              <p>
-                Currently, the scanner reads Markly templates only. Use an
-                upright PNG, JPG, or WebP image with all four corner squares
-                visible. Keep the page flat and evenly lit. Standardised sheets
-                let us grade your answers without sending images to an external
-                service.
-              </p>
-            </details>
-            <details>
-              <summary>How are unclear marks handled?</summary>
-              <p>
-                Multiple filled bubbles and lightly shaded marks are flagged for
-                review. Open a student result, choose each highlighted question,
-                confirm A, B, C, D or Unanswered, and save. Those sheets are
-                excluded from averages until reviewed.
-              </p>
-            </details>
-            <details>
-              <summary>Is my student data private?</summary>
-              <p>
-                Yes. Sheet images are processed in your browser and are not
-                stored or uploaded. Results and keys are saved in this browser’s
-                local storage. Export a workspace backup in Settings before
-                clearing browser data or moving devices.
-              </p>
-            </details>
-            <details>
-              <summary>Is this real student data?</summary>
-              <p>
-                The initial workspace contains clearly labelled, fictional
-                sample data so you can explore. Choose Start a fresh workspace
-                in Settings when you’re ready to use your own sheets.
-              </p>
-            </details>
-            <button
-              className="button button-secondary full-width"
-              onClick={() => downloadTemplate(exam)}
-            >
-              <ArrowDownToLine size={15} />
-              Download your OMR template
-            </button>
+            <div className="v2-help-step">
+              <span>02</span>
+              <div>
+                <h3>Build the right key and layout.</h3>
+                <p>
+                  Create an exam with 1–500 questions and A–D or A–E options.
+                  Add non-overlapping subject ranges. In Layout studio, adjust
+                  fields, bubble spacing, registration points, and the OCR crop.
+                  Print at 100% scale.
+                </p>
+              </div>
+            </div>
+            <div className="v2-help-step">
+              <span>03</span>
+              <div>
+                <h3>Scan a sample. Then your whole batch.</h3>
+                <p>
+                  Use upright, evenly lit photos or multipage PDFs. OpenCV
+                  aligns the page; OCR or a printed QR links identity. For
+                  legacy PDFs without QR codes, check each page number and enter
+                  a roll number or use OCR. Keep four markers visible, or
+                  calibrate paper-edge mode.
+                </p>
+              </div>
+            </div>
+            <div className="v2-help-step">
+              <span>04</span>
+              <div>
+                <h3>A human touch matters.</h3>
+                <p>
+                  Review uncertain marks, low-confidence identities, and missing
+                  pages. Manually correct responses to rescore instantly. Only
+                  complete, reviewed results enter averages, rankings, and
+                  percentiles.
+                </p>
+              </div>
+            </div>
+            <div className="v2-help-step">
+              <span>05</span>
+              <div>
+                <h3>Keep your progress protected.</h3>
+                <p>
+                  Device mode saves only to your browser. GitHub Pages cannot
+                  run accounts or a database. The included Node server provides
+                  secure accounts and shared SQLite data when separately hosted.
+                  Download regular backups and keep an off-device copy.
+                </p>
+              </div>
+            </div>
           </div>
           <div className="modal-footer">
             <button
               className="button button-primary"
-              onClick={() => setHelpOpen(false)}
+              onClick={() => setHelp(false)}
             >
-              Got it. Let’s grow.
-              <ArrowRight size={15} />
+              A little clearer. Thank you.
+              <Check size={15} />
             </button>
           </div>
         </Modal>
       )}
       {toastMessage && (
         <div key={toastMessage.id} className="toast" role="status">
-          <span>
-            <Check size={16} />
+          <span aria-hidden="true">
+            <Check size={17} />
           </span>
           <p>{toastMessage.text}</p>
           <button

@@ -62,6 +62,15 @@ describe("registration and perspective", () => {
       expect(p.y).toBeCloseTo(MARKERS[i].y - 0.5, 3);
     });
   });
+  it("does not mistake a larger square school logo for a registration marker", () => {
+    const { image } = syntheticSheet();
+    for (let y = 140; y < 280; y++)
+      for (let x = 100; x < 240; x++) {
+        const i = (y * image.width + x) * 4;
+        image.data[i] = image.data[i + 1] = image.data[i + 2] = 0;
+      }
+    expect(findMarkers(image)[0].x).toBeCloseTo(MARKERS[0].x - 0.5, 3);
+  });
   it("rejects images that do not use the OMR template", () => {
     const { image } = syntheticSheet();
     image.data.fill(255);

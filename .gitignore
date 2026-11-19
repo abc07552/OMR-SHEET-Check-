@@ -5,3 +5,14 @@ node_modules
 .cache
 playwright-report
 test-results
+
+# Persistent school data, secrets, and generated local OCR assets
+.data/
+.env
+public/vendor/
+.env.*
+!.env.example
+/data/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm

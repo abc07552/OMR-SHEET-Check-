@@ -22,7 +22,13 @@ import {
   Users,
 } from "lucide-react";
 import type { Exam, Result, Workspace } from "./data";
-import { downloadFile, getStats, questionStats } from "./data";
+import {
+  downloadFile,
+  getStats,
+  questionStats,
+  getOptions,
+  subjectStats,
+} from "./data";
 import { EmptyState, PageHeading, Select } from "./components";
 import { ExamBar } from "./Overview";
 interface Props {
@@ -37,7 +43,7 @@ interface Props {
 export function questionCSV(results: Result[], exam: Exam) {
   const stats = questionStats(results, exam);
   return [
-    "Question,Correct answer,Correct responses,Total evaluated,Accuracy (%),A,B,C,D,Unanswered",
+    `Question,Correct answer,Correct responses,Total evaluated,Accuracy (%),${getOptions(exam).join(",")},Unanswered`,
     ...stats.map((q) =>
       [
         q.number,
@@ -111,6 +117,39 @@ export default function Analytics({
           setExamId(id);
         }}
       />
+      <section className="card subject-performance">
+        <div className="card-heading">
+          <div>
+            <h2>Understanding, subject by subject.</h2>
+            <p>
+              Weighted score and correct-answer accuracy tell different parts of
+              the story.
+            </p>
+          </div>
+        </div>
+        <div className="subject-performance-grid">
+          {subjectStats(filtered, exam).map((s) => (
+            <div key={s.name}>
+              <span className="micro-label">
+                Q{s.from}–{s.to}
+              </span>
+              <h3>{s.name}</h3>
+              <strong>
+                {s.average.toFixed(1)}
+                <small>%</small>
+              </strong>
+              <span>Average score</span>
+              <div className="v2-track">
+                <i style={{ width: `${s.average}%` }} />
+              </div>
+              <p>
+                {s.accuracy.toFixed(1)}% correct-answer accuracy ·{" "}
+                {s.students.length} evaluated
+              </p>
+            </div>
+          ))}
+        </div>
+      </section>
       <div className="analytics-stat-grid">
         <div className="card analytics-stat">
           <span className="stat-icon green">

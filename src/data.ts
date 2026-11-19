@@ -1,5 +1,10 @@
-export type Option = "A" | "B" | "C" | "D";
-export const OPTIONS: Option[] = ["A", "B", "C", "D"];
+import { isEmbeddedRaster, layoutErrors } from "./layout";
+import type { OMRLayout } from "./layout";
+
+export type Option = "A" | "B" | "C" | "D" | "E";
+export const OPTIONS: Option[] = ["A", "B", "C", "D", "E"];
+export const getOptions = (exam: Pick<Exam, "optionCount">): Option[] =>
+  OPTIONS.slice(0, exam.optionCount || 4);
 export type Page =
   | "overview"
   | "scanner"
@@ -7,8 +12,47 @@ export type Page =
   | "students"
   | "analytics"
   | "reports"
-  | "settings";
+  | "settings"
+  | "templates"
+  | "leaderboard"
+  | "backups"
+  | "administration";
+export interface SubjectRange {
+  name: string;
+  from: number;
+  to: number;
+}
+export interface School {
+  id: string;
+  name: string;
+  code: string;
+  address?: string;
+}
+export interface ClassRoom {
+  id: string;
+  schoolId: string;
+  name: string;
+  academicYear: string;
+}
+export interface Student {
+  id: string;
+  schoolId: string;
+  classId?: string;
+  section: string;
+  name: string;
+  roll: string;
+  email?: string;
+  phone?: string;
+  guardian?: string;
+  registeredAt: string;
+}
 export interface Exam {
+  schoolId?: string;
+  optionCount?: 4 | 5;
+  subjects?: SubjectRange[];
+  layout?: OMRLayout;
+  duration?: number;
+  classIds?: string[];
   id: string;
   title: string;
   subject: string;
@@ -32,6 +76,13 @@ export interface Result {
   confirmed: boolean;
   createdAt: string;
   source: "demo" | "scan";
+  pageIndices?: number[];
+  pageTotal?: number;
+  layoutSignature?: string;
+  identityReview?: boolean;
+  missingPagesAccepted?: boolean;
+  engine?: "opencv" | "canvas";
+  scanConfidence?: number;
 }
 export interface Workspace {
   version: 1;
@@ -39,6 +90,10 @@ export interface Workspace {
   results: Result[];
   school: string;
   teacher: string;
+  schools?: School[];
+  classes?: ClassRoom[];
+  students?: Student[];
+  activeSchoolId?: string;
 }
 
 function seeded(seed: number) {
@@ -157,7 +212,9 @@ export function createDemoData(): Workspace {
         if (random() < 0.009) return null;
         return random() < chance
           ? correct
-          : OPTIONS.filter((a) => a !== correct)[Math.floor(random() * 3)];
+          : OPTIONS.slice(0, 4).filter((a) => a !== correct)[
+              Math.floor(random() * 3)
+            ];
       });
       results.push({
         id: `${exam.id}-student-${i}`,
@@ -210,14 +267,17 @@ export function isValidWorkspace(value: unknown): value is Workspace {
         typeof e.date === "string" &&
         /^\d{4}-\d{2}-\d{2}$/.test(e.date) &&
         Number.isFinite(Date.parse(e.date)) &&
+        new Date(e.date).toISOString().slice(0, 10) === e.date &&
         Number.isInteger(e.questions) &&
         e.questions > 0 &&
-        e.questions <= 100 &&
+        e.questions <= 500 &&
         validAnswers(e.answers, e.questions) &&
         Number.isFinite(e.marksCorrect) &&
         e.marksCorrect > 0 &&
+        e.marksCorrect <= 100 &&
         Number.isFinite(e.negativeMarks) &&
         e.negativeMarks >= 0 &&
+        e.negativeMarks <= 100 &&
         Number.isFinite(e.passPercentage) &&
         e.passPercentage >= 1 &&
         e.passPercentage <= 100 &&
@@ -227,6 +287,109 @@ export function isValidWorkspace(value: unknown): value is Workspace {
   )
     return false;
   if (new Set(v.exams.map((e) => e.id)).size !== v.exams.length) return false;
+  if (
+    v.exams.some(
+      (e) =>
+        e.optionCount !== undefined &&
+        e.optionCount !== 4 &&
+        e.optionCount !== 5,
+    )
+  )
+    return false;
+  if (
+    v.exams.some((e) => (e.optionCount || 4) === 4 && e.answers.includes("E"))
+  )
+    return false;
+  if (
+    v.exams.some(
+      (e) =>
+        e.subjects &&
+        (!Array.isArray(e.subjects) ||
+          e.subjects.some(
+            (s) =>
+              !s ||
+              typeof s.name !== "string" ||
+              !Number.isInteger(s.from) ||
+              !Number.isInteger(s.to) ||
+              s.from < 1 ||
+              s.to < s.from ||
+              s.to > e.questions,
+          )),
+    )
+  )
+    return false;
+  if (
+    v.exams.some(
+      (e) => e.layout && (!validLayout(e.layout) || layoutErrors(e).length > 0),
+    )
+  )
+    return false;
+  if (
+    v.exams.some((e) => {
+      const covered = (e.subjects || []).flatMap((s) =>
+        Array.from({ length: s.to - s.from + 1 }, (_, i) => s.from + i),
+      );
+      return new Set(covered).size !== covered.length;
+    })
+  )
+    return false;
+  if (
+    v.students !== undefined &&
+    (!Array.isArray(v.students) ||
+      v.students.some(
+        (s) =>
+          !s ||
+          ![s.id, s.schoolId, s.section, s.name, s.roll, s.registeredAt].every(
+            (x) => typeof x === "string",
+          ) ||
+          !s.name.trim() ||
+          !s.roll.trim(),
+      ) ||
+      new Set(v.students.map((s) => s.id)).size !== v.students.length)
+  )
+    return false;
+  if (
+    v.schools !== undefined &&
+    (!Array.isArray(v.schools) ||
+      !v.schools.length ||
+      v.schools.some(
+        (s) =>
+          !s || ![s.id, s.name, s.code].every((x) => typeof x === "string"),
+      ))
+  )
+    return false;
+  if (
+    v.classes !== undefined &&
+    (!Array.isArray(v.classes) ||
+      v.classes.some(
+        (c) =>
+          !c ||
+          ![c.id, c.schoolId, c.name, c.academicYear].every(
+            (x) => typeof x === "string",
+          ),
+      ))
+  )
+    return false;
+  if (v.schools) {
+    const ids = new Set(v.schools.map((s) => s.id));
+    if (
+      ids.size !== v.schools.length ||
+      (v.activeSchoolId !== undefined && !ids.has(v.activeSchoolId)) ||
+      v.exams.some((e) => e.schoolId !== undefined && !ids.has(e.schoolId)) ||
+      v.students?.some((s) => !ids.has(s.schoolId)) ||
+      v.classes?.some((c) => !ids.has(c.schoolId))
+    )
+      return false;
+    const rolls = (v.students || []).map(
+      (s) => `${s.schoolId}:${s.roll.trim().toLowerCase()}`,
+    );
+    if (new Set(rolls).size !== rolls.length) return false;
+  }
+  if (
+    new Set(v.results.map((r) => `${r?.examId}:${r?.studentId}`)).size !==
+    v.results.length
+  )
+    return false;
   return (
     v.results.every((r) => {
       if (!r || typeof r !== "object") return false;
@@ -239,6 +402,33 @@ export function isValidWorkspace(value: unknown): value is Workspace {
         typeof r.roll === "string" &&
         typeof r.section === "string" &&
         validAnswers(r.answers, exam.questions) &&
+        !((exam.optionCount || 4) === 4 && r.answers.includes("E")) &&
+        (r.pageTotal === undefined ||
+          (Number.isInteger(r.pageTotal) &&
+            r.pageTotal >= 1 &&
+            r.pageTotal <= 500)) &&
+        (r.pageIndices === undefined ||
+          (Array.isArray(r.pageIndices) &&
+            new Set(r.pageIndices).size === r.pageIndices.length &&
+            r.pageIndices.every(
+              (p) =>
+                Number.isInteger(p) &&
+                p >= 0 &&
+                p <
+                  (r.pageTotal ||
+                    Math.ceil(
+                      exam.questions /
+                        (exam.layout?.questionsPerPage ||
+                          Math.min(100, exam.questions)),
+                    )),
+            ))) &&
+        (r.layoutSignature === undefined ||
+          (typeof r.layoutSignature === "string" &&
+            /^[a-f0-9]{8}$/.test(r.layoutSignature))) &&
+        (r.identityReview === undefined ||
+          typeof r.identityReview === "boolean") &&
+        (r.missingPagesAccepted === undefined ||
+          typeof r.missingPagesAccepted === "boolean") &&
         Array.isArray(r.flagged) &&
         r.flagged.every(
           (q) => Number.isInteger(q) && q >= 0 && q < exam.questions,
@@ -255,12 +445,12 @@ export function loadWorkspace(): Workspace {
     const raw = localStorage.getItem("markly-workspace-v1");
     if (raw) {
       const saved = JSON.parse(raw);
-      if (isValidWorkspace(saved)) return saved;
+      if (isValidWorkspace(saved)) return enrichWorkspace(saved);
     }
   } catch {
     /* Private browsing or an old workspace: use a fresh demo. */
   }
-  return createDemoData();
+  return createAdvancedDemo();
 }
 export function gradeResult(result: Result, exam: Exam) {
   let correct = 0,
@@ -280,7 +470,21 @@ export function gradeResult(result: Result, exam: Exam) {
   const percentage = maximum ? (score / maximum) * 100 : 0;
   const accuracy =
     correct + wrong + blank ? (correct / (correct + wrong + blank)) * 100 : 0;
-  const needsReview = result.flagged.length > 0 && !result.confirmed;
+  const expectedPages =
+    result.pageTotal ||
+    Math.ceil(
+      exam.questions /
+        (exam.layout?.questionsPerPage || Math.min(100, exam.questions)),
+    );
+  const missingPages =
+    expectedPages > 1 &&
+    new Set(result.pageIndices || []).size < expectedPages &&
+    !result.missingPagesAccepted;
+  const needsReview =
+    !exam.published ||
+    (result.flagged.length > 0 && !result.confirmed) ||
+    !!result.identityReview ||
+    missingPages;
   const status: "Review" | "Passed" | "Failed" = needsReview
     ? "Review"
     : percentage >= exam.passPercentage
@@ -296,6 +500,7 @@ export function gradeResult(result: Result, exam: Exam) {
     accuracy,
     status,
     needsReview,
+    missingPages,
   };
 }
 export function getStats(results: Result[], exam: Exam) {
@@ -344,11 +549,13 @@ export function getDistribution(results: Result[], exam: Exam) {
 export function questionStats(results: Result[], exam: Exam) {
   const valid = results.filter((r) => !gradeResult(r, exam).needsReview);
   return exam.answers.map((answer, i) => {
-    const counts = OPTIONS.map((option) => ({
+    const counts = getOptions(exam).map((option) => ({
       option,
       count: valid.filter((r) => r.answers[i] === option).length,
     }));
-    const correct = valid.filter((r) => r.answers[i] === answer).length;
+    const correct = answer
+      ? valid.filter((r) => r.answers[i] === answer).length
+      : 0;
     return {
       number: i + 1,
       answer,
@@ -438,4 +645,300 @@ export function resultsCSV(results: Result[], exam: Exam) {
     ]);
   });
   return "\uFEFF" + rows.map((row) => row.map(escape).join(",")).join("\r\n");
+}
+
+function validLayout(l: OMRLayout): boolean {
+  return (
+    l.version === 2 &&
+    typeof l.name === "string" &&
+    Number.isInteger(l.questionsPerPage) &&
+    l.questionsPerPage >= 1 &&
+    l.questionsPerPage <= 100 &&
+    Number.isInteger(l.columns) &&
+    l.columns >= 1 &&
+    l.columns <= 5 &&
+    [
+      l.startX,
+      l.startY,
+      l.columnGap,
+      l.rowGap,
+      l.optionGap,
+      l.radius,
+      l.labelOffset,
+      l.threshold,
+    ].every(Number.isFinite) &&
+    l.radius >= 5 &&
+    l.radius <= 25 &&
+    l.threshold >= 0.15 &&
+    l.threshold <= 0.95 &&
+    ["circle", "square"].includes(l.bubbleShape) &&
+    ["markers", "page"].includes(l.anchorMode) &&
+    Array.isArray(l.anchors) &&
+    l.anchors.length === 4 &&
+    l.anchors.every(
+      (p) =>
+        p &&
+        Number.isFinite(p.x) &&
+        Number.isFinite(p.y) &&
+        p.x >= 0 &&
+        p.x <= 1240 &&
+        p.y >= 0 &&
+        p.y <= 1754,
+    ) &&
+    Array.isArray(l.fields) &&
+    l.fields.length <= 40 &&
+    l.fields.every(
+      (f) =>
+        f &&
+        typeof f.id === "string" &&
+        typeof f.text === "string" &&
+        ["text", "student", "roll", "qr", "line", "logo"].includes(f.type) &&
+        [f.x, f.y, f.width, f.height, f.fontSize].every(Number.isFinite) &&
+        f.width > 0 &&
+        f.height > 0 &&
+        f.fontSize > 0 &&
+        typeof f.visible === "boolean" &&
+        typeof f.bold === "boolean" &&
+        (f.image === undefined || isEmbeddedRaster(f.image)),
+    ) &&
+    !!l.rollRegion &&
+    Object.values(l.rollRegion).every(Number.isFinite) &&
+    (l.referenceImage === undefined ||
+      isEmbeddedRaster(l.referenceImage, 2000000))
+  );
+}
+export function enrichWorkspace(input: Workspace): Workspace {
+  const id =
+    input.activeSchoolId || input.schools?.[0]?.id || "school-greenwood";
+  const schools = input.schools?.length
+    ? input.schools
+    : [{ id, name: input.school, code: "GW" }];
+  const exams = input.exams.map((e) => ({
+    ...e,
+    schoolId: e.schoolId || id,
+    optionCount: e.optionCount || ((e.answers.includes("E") ? 5 : 4) as 4 | 5),
+  }));
+  const classes =
+    input.classes ||
+    [...new Set(input.results.map((r) => r.section))].map((name, i) => ({
+      id: `class-${i}`,
+      schoolId: id,
+      name,
+      academicYear: "2026–27",
+    }));
+  const byId = new Map<string, Student>();
+  input.results.forEach((r) => {
+    if (!byId.has(r.studentId))
+      byId.set(r.studentId, {
+        id: r.studentId,
+        schoolId: exams.find((e) => e.id === r.examId)?.schoolId || id,
+        section: r.section,
+        classId: classes.find((c) => c.name === r.section)?.id,
+        name: r.name,
+        roll: r.roll,
+        registeredAt: r.createdAt,
+      });
+  });
+  return {
+    ...input,
+    exams,
+    schools,
+    classes,
+    students: input.students || [...byId.values()],
+    activeSchoolId: id,
+  };
+}
+export function createAdvancedDemo(): Workspace {
+  const data = enrichWorkspace(createDemoData());
+  const latest = data.exams.at(-1)!;
+  latest.subject = "Science";
+  latest.subjects = [
+    { name: "Physics", from: 1, to: 17 },
+    { name: "Chemistry", from: 18, to: 34 },
+    { name: "Mathematics", from: 35, to: 50 },
+  ];
+  return data;
+}
+export function blankWorkspace(
+  school: School,
+  teacher = "Educator",
+): Workspace {
+  return {
+    version: 1,
+    school: school.name,
+    teacher,
+    schools: [school],
+    classes: [],
+    students: [],
+    activeSchoolId: school.id,
+    results: [],
+    exams: [
+      {
+        id: `exam-${crypto.randomUUID().slice(0, 8)}`,
+        schoolId: school.id,
+        title: "My first assessment",
+        subject: "General",
+        date: new Date().toISOString().slice(0, 10),
+        questions: 50,
+        marksCorrect: 2,
+        negativeMarks: 0,
+        passPercentage: 40,
+        answers: Array(50).fill(null),
+        optionCount: 5,
+        published: false,
+      },
+    ],
+  };
+}
+export function scopeWorkspace(
+  workspace: Workspace,
+  schoolId: string,
+): Workspace {
+  const data = enrichWorkspace(workspace),
+    school = data.schools!.find((s) => s.id === schoolId) || data.schools![0];
+  const exams = data.exams.filter((e) => e.schoolId === school.id),
+    examIds = new Set(exams.map((e) => e.id));
+  return {
+    ...data,
+    school: school.name,
+    activeSchoolId: school.id,
+    exams,
+    classes: data.classes!.filter((c) => c.schoolId === school.id),
+    students: data.students!.filter((s) => s.schoolId === school.id),
+    results: data.results.filter((r) => examIds.has(r.examId)),
+  };
+}
+export function mergeSchoolWorkspace(
+  all: Workspace,
+  changed: Workspace,
+  schoolId: string,
+): Workspace {
+  const scoped = enrichWorkspace({ ...changed, activeSchoolId: schoolId }),
+    oldIds = new Set(
+      all.exams
+        .filter((e) => (e.schoolId || all.activeSchoolId) === schoolId)
+        .map((e) => e.id),
+    );
+  return {
+    ...all,
+    school: scoped.school,
+    teacher: scoped.teacher,
+    activeSchoolId: schoolId,
+    schools: all.schools!.map((s) =>
+      s.id === schoolId ? { ...s, name: scoped.school } : s,
+    ),
+    exams: [
+      ...all.exams.filter((e) => e.schoolId !== schoolId),
+      ...scoped.exams.map((e) => ({ ...e, schoolId })),
+    ],
+    results: [
+      ...all.results.filter((r) => !oldIds.has(r.examId)),
+      ...scoped.results,
+    ],
+    students: [
+      ...(all.students || []).filter((s) => s.schoolId !== schoolId),
+      ...(scoped.students || []).map((s) => ({ ...s, schoolId })),
+    ],
+    classes: [
+      ...(all.classes || []).filter((c) => c.schoolId !== schoolId),
+      ...(scoped.classes || []).map((c) => ({ ...c, schoolId })),
+    ],
+  };
+}
+export function subjectStats(results: Result[], exam: Exam) {
+  const subjects = exam.subjects?.length
+    ? exam.subjects
+    : [{ name: exam.subject, from: 1, to: exam.questions }];
+  const valid = results.filter((r) => !gradeResult(r, exam).needsReview);
+  return subjects.map((subject) => {
+    const max = (subject.to - subject.from + 1) * exam.marksCorrect;
+    const students = valid.map((r) => {
+      let correct = 0,
+        wrong = 0;
+      for (let q = subject.from - 1; q < subject.to; q++) {
+        if (r.answers[q] && exam.answers[q]) {
+          if (r.answers[q] === exam.answers[q]) correct++;
+          else wrong++;
+        }
+      }
+      const score = Math.max(
+        0,
+        correct * exam.marksCorrect - wrong * exam.negativeMarks,
+      );
+      return {
+        result: r,
+        correct,
+        wrong,
+        score,
+        percentage: max ? (score / max) * 100 : 0,
+      };
+    });
+    return {
+      ...subject,
+      maximum: max,
+      students,
+      average: students.length
+        ? students.reduce((s, r) => s + r.percentage, 0) / students.length
+        : 0,
+      accuracy: valid.length
+        ? (students.reduce((s, r) => s + r.correct, 0) /
+            (valid.length * (subject.to - subject.from + 1))) *
+          100
+        : 0,
+    };
+  });
+}
+export function rankings(results: Result[], exam: Exam, subject?: string) {
+  const valid = results.filter((r) => !gradeResult(r, exam).needsReview);
+  const subjectData = subject
+    ? subjectStats(results, exam).find((s) => s.name === subject)
+    : null;
+  const items = valid
+    .map((result) => {
+      const grade = gradeResult(result, exam),
+        sub = subjectData?.students.find((s) => s.result.id === result.id);
+      return {
+        result,
+        grade,
+        score: sub ? sub.score : grade.score,
+        percentage: sub ? sub.percentage : grade.percentage,
+      };
+    })
+    .sort(
+      (a, b) => b.score - a.score || a.result.name.localeCompare(b.result.name),
+    );
+  const groups = new Map<number, { rank: number; percentile: number }>();
+  for (let first = 0; first < items.length;) {
+    let last = first + 1;
+    while (last < items.length && items[last].score === items[first].score)
+      last++;
+    groups.set(items[first].score, {
+      rank: first + 1,
+      percentile: ((items.length - last) / items.length) * 100,
+    });
+    first = last;
+  }
+  return items.map((item, i) => ({
+    ...item,
+    ...groups.get(item.score)!,
+    position: i + 1,
+  }));
+}
+export function studentValidation(
+  student: Pick<Student, "name" | "roll" | "section" | "schoolId">,
+  students: Student[],
+  excludeId?: string,
+) {
+  if (!student.name.trim() || !student.roll.trim() || !student.section.trim())
+    return "Name, roll number and class are required.";
+  if (
+    students.some(
+      (s) =>
+        s.id !== excludeId &&
+        s.schoolId === student.schoolId &&
+        s.roll.toLowerCase() === student.roll.trim().toLowerCase(),
+    )
+  )
+    return "That roll number is already registered in this school.";
+  return null;
 }

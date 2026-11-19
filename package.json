@@ -1,7 +1,7 @@
 {
   "name": "markly-omr",
   "private": true,
-  "version": "1.0.0",
+  "version": "2.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
@@ -9,27 +9,54 @@
     "build:pages": "tsc -b && vite build --base=/OMR-SHEET-Check-/ --outDir=docs",
     "preview": "vite preview --host 0.0.0.0",
     "preview:pages": "vite preview --host 0.0.0.0 --base=/OMR-SHEET-Check-/ --outDir=docs",
-    "test": "vitest run",
-    "format": "prettier --write src index.html vite.config.ts tsconfig*.json"
+    "test": "vitest run src",
+    "format": "prettier --write src server scripts index.html vite.config.ts tsconfig*.json README.md THIRD_PARTY.md",
+    "predev": "node scripts/prepare-assets.mjs",
+    "prebuild": "node scripts/prepare-assets.mjs",
+    "prebuild:pages": "node scripts/prepare-assets.mjs",
+    "server": "node --env-file-if-exists=.env server/index.mjs",
+    "start": "node --env-file-if-exists=.env server/index.mjs",
+    "test:server": "node --test server/*.test.mjs",
+    "test:all": "npm test && npm run test:server",
+    "admin:reset": "node --env-file-if-exists=.env server/reset-password.mjs"
   },
   "dependencies": {
     "@fontsource-variable/dm-sans": "^5.2.6",
+    "@techstark/opencv-js": "^4.12.0-release.1",
+    "@tesseract.js-data/eng": "^1.0.0",
+    "exceljs": "^4.4.0",
+    "express": "^5.3.0",
+    "helmet": "^8.3.0",
+    "jspdf": "^4.2.1",
+    "jspdf-autotable": "^5.0.9",
+    "jsqr": "^1.4.0",
     "lucide-react": "^0.468.0",
+    "pdfjs-dist": "^6.5.438",
+    "qrcode": "^1.5.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "recharts": "^2.15.1"
+    "recharts": "^2.15.1",
+    "tesseract.js": "^7.0.0",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^19.0.3",
     "@types/react-dom": "^19.0.2",
     "@vitejs/plugin-react": "^4.3.4",
     "prettier": "^3.10.1",
+    "supertest": "^7.3.2",
     "typescript": "~5.7.2",
     "vite": "^6.0.5",
     "vitest": "^5.1.0"
   },
   "engines": {
-    "node": ">=22.12.0"
+    "node": ">=22.13.0"
+  },
+  "overrides": {
+    "exceljs": {
+      "uuid": "^11.1.1"
+    }
   }
 }
