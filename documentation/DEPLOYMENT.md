@@ -91,6 +91,7 @@ Optional storage settings:
 
 - `S3_BUCKET`, `AWS_REGION`, optionally `S3_ENDPOINT_URL` select the private object store. Use workload IAM roles where available, otherwise narrowly scoped server-only credentials.
 - Grant only the required object prefix operations; deny public access, enable provider encryption/versioning/retention and monitor failures. Application encryption remains enabled for originals/recovery objects before upload.
+- Originals/recovery objects are capped at 50 MiB plaintext. Encrypted storage/download bounds include Fernet padding, envelope and base64 overhead (up to about 66.7 MiB stored for a 50 MiB original). Both local and provider reads are bounded; provider response streams close even on a transport/decryption error. Validate actual provider latency, IAM and transport failures separately from the unit stream tests.
 - Switching from local storage to S3 does **not** migrate existing objects automatically. Rehearse an explicit object-copy/verification plan while preserving keys and the database/object mapping.
 
 Optional recovery email settings: `SMTP_HOST`, `SMTP_PORT` (normally 587), `SMTP_FROM`, and optional authentication. The application requires STARTTLS and returns a non-enumerating recovery response. Configure provider authorization/SPF/DKIM/DMARC, test real delivery/expiry/single-use behavior and monitor delivery failures. An unset SMTP host does not magically send mail; trusted-server recovery remains available.

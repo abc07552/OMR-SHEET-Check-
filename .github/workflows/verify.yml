@@ -5,17 +5,24 @@ on:
   push:
     branches: [main, "arena/**"]
   workflow_dispatch:
+    inputs:
+      diagnose_run:
+        description: "Inspect a failed synthetic verification run on this branch (leave empty for normal verification)"
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: omr-verify-${{ github.workflow }}-${{ github.ref }}
+  group: omr-verify-${{ github.workflow }}-${{ github.ref }}-${{ inputs.diagnose_run || 'verify' }}
   cancel-in-progress: true
 
 jobs:
   regression:
     name: Unit, PostgreSQL, genuine CV and browser regressions
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.diagnose_run == '' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     services:
@@ -88,6 +95,7 @@ jobs:
 
   container:
     name: Enterprise image, production migrations and container health
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.diagnose_run == '' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     env:
@@ -145,3 +153,41 @@ jobs:
       - name: Remove disposable CI services and volumes
         if: always()
         run: docker compose --env-file .env.example -f deployment/compose.yaml down --volumes --remove-orphans
+
+  diagnostics:
+    name: Inspect an earlier synthetic verification failure
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.diagnose_run != '' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: read
+    steps:
+      - name: Expose failure context as a bounded check annotation
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          DIAGNOSE_RUN: ${{ inputs.diagnose_run }}
+        run: |
+          python3 - <<'PY'
+          import json, os, re, subprocess
+          run = os.environ["DIAGNOSE_RUN"]
+          if not re.fullmatch(r"[0-9]{1,20}", run):
+              raise SystemExit("The run ID must contain only digits.")
+          metadata = json.loads(subprocess.check_output([
+              "gh", "api", f"repos/{os.environ['GH_REPO']}/actions/runs/{run}"
+          ], text=True))
+          # Never retrieve another branch/workflow's potentially private logs.
+          if (metadata["head_branch"] != os.environ["GITHUB_REF_NAME"]
+                  or metadata["name"] != os.environ["GITHUB_WORKFLOW"]
+                  or metadata["conclusion"] != "failure"):
+              raise SystemExit("Choose a failed synthetic verification run on this same branch.")
+          log = subprocess.check_output([
+              "gh", "run", "view", run, "--log-failed"
+          ], text=True)
+          log = re.sub(r"\x1b\[[0-9;]*m", "", log)
+          # GitHub's original secret masking remains in force. The bounded tail
+          # is useful where signed archive hosts cannot be reached by operators.
+          message = "\n".join(log.splitlines()[-100:])[-24000:]
+          message = message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+          print(f"::warning title=Earlier synthetic QA failure {run}::{message}")
+          PY

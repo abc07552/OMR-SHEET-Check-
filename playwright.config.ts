@@ -16,7 +16,9 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: 0,
   outputDir: ".cache/qa/e2e-artifacts",
-  reporter: [["list"]],
+  // Emit structured failure annotations in Actions as well as retaining traces;
+  // restricted environments may not be able to download signed log archives.
+  reporter: process.env.GITHUB_ACTIONS ? [["list"], ["github"]] : [["list"]],
   // Default runs manage their own disposable server. An explicitly supplied URL
   // must also be a FRESH QA server; the first-run assertion refuses populated DBs.
   ...(process.env.OMR_E2E_BASE_URL

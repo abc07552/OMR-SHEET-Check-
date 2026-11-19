@@ -55,6 +55,8 @@ class ObjectStore:
 
     def put(self, key, data, media_type="application/octet-stream", encrypt=False):
         self._path(key)
+        if len(data) > MAX_UPLOAD:
+            raise ValueError("The object exceeds the 50 MiB plaintext storage limit.")
         payload = self.cipher.encrypt(data) if encrypt else data
         if self.s3:
             self.s3.put_object(
@@ -78,11 +80,26 @@ class ObjectStore:
 
     def get(self, key, decrypt=False):
         self._path(key)
+        # Fernet adds 57 bytes, PKCS7 padding (including a whole block at the
+        # boundary), then base64. Limiting ciphertext to the plaintext upload
+        # cap truncates otherwise valid near-limit encrypted originals on S3.
+        stored_limit = 4 * ((57 + (MAX_UPLOAD // 16 + 1) * 16 + 2) // 3)
         if self.s3:
-            data = self.s3.get_object(Bucket=self.settings.s3_bucket, Key=key)["Body"].read(MAX_UPLOAD + 1)
+            body = self.s3.get_object(Bucket=self.settings.s3_bucket, Key=key)["Body"]
+            try:
+                data = body.read(stored_limit + 1)
+            finally:
+                body.close()
         else:
-            data = self._path(key).read_bytes()
-        return self.cipher.decrypt(data) if decrypt else data
+            with self._path(key).open("rb") as stream:
+                data = stream.read(stored_limit + 1)
+        if len(data) > stored_limit:
+            raise ValueError("The stored object exceeds the encrypted storage limit.")
+        if decrypt:
+            data = self.cipher.decrypt(data)
+            if len(data) > MAX_UPLOAD:
+                raise ValueError("The decrypted object exceeds the 50 MiB plaintext storage limit.")
+        return data
 
     def delete(self, key):
         self._path(key)
