@@ -320,3 +320,92 @@ inferred from these local results. No production Google project/credentials,
 canonical hosted domain, SMTP account or authorized live Drive user was supplied.
 Live consent/Drive/SMTP, physical Android returns, camera/print/PWA upgrades and
 permanent production deployment remain explicit operator/device acceptance gates.
+
+## Three-digit answers and reviewed layout scanning
+
+Implemented the requested **3-digit integer option** and **Scan a layout** in
+Layout Studio, including mixed MCQ/numeric keys, range/individual types, canonical
+`000`–`999` tokens, natural short entry/paste, genuine 30-bubble measurement,
+whole-number exact scoring, manual verification, retained evidence/history and
+numeric response-frequency reporting. Standard layouts still support 500
+questions; numeric defaults use 12 per page. No new runtime dependency or
+destructive database migration was needed.
+
+Camera/gallery layout import uses actual OpenCV contours/Hough votes, repeated
+solid-square or full-paper registration and reviewed editable question regions.
+All grid candidates start excluded; users classify MCQ rows versus integer
+columns, choose intended three columns/ten digit rows, exclude identity grids,
+renumber and explicitly accept a draft. OCR starts disabled for imported forms.
+The normalized reference is saved school data, disclosed in the dialog, removable
+without losing coordinates and never printed/keyed. Dirty-layout downloads are
+disabled until save, avoiding a visible-draft/older-print mismatch. The guide is
+[INTEGER_LAYOUT_SCANNING.md](INTEGER_LAYOUT_SCANNING.md).
+
+### Regression fixes and review findings
+
+- Full-suite source-preservation testing caught new default `ocrEnabled` /
+  `questionRegions` fields being injected into historical layout serialization.
+  They now remain absent when absent originally. The original migration
+  preservation assertion was retained; the rerun passed.
+- Layout mapping now validates column and zero-row bounds explicitly, preventing
+  an invalid last-row offset from wrapping into the next digit column. Grid-as-
+  MCQ and long regular-column regressions prevent automatic numeric
+  reinterpretation. Duplicate/overlapping/out-of-page geometry is rejected.
+- Registration quality now measures the requested or QR-identified **page's**
+  explicit points/types, not always page 1. Native tests verify distinct page
+  geometry with and without a QR identifier; browser quality tests verify the
+  page-aware outline measurement.
+- Code review extended response-history locks to MCQ option counts as well as
+  question counts/types. FastAPI and preserved Node API regressions verify 409
+  and unchanged state even when a client simultaneously removes the results.
+  Keys/rules can still be corrected with retained evaluations.
+- Single-scan operation receipts now bind to geometry plus reading threshold /
+  OCR settings, refusing a stale replay after calibration changes. The same
+  exact operation still replays idempotently.
+- Numeric breakdowns use whole tokens. Mixed question exports keep fixed MCQ
+  columns and add response frequencies, rather than shifting rows or displaying
+  misleading A–E-only counts for an integer question.
+
+### Executed local verification
+
+| Check                        | Result                                                                                                                                                                                                                      |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Full Vitest suite            | **286 tests / 19 files passed**, 16.32s                                                                                                                                                                                     |
+| Preserved Node suite         | **33 passed**, including numeric serialization and history locks                                                                                                                                                            |
+| Full Pytest suite            | **295 passed**, 164.96s; SQLite and real isolated PostgreSQL                                                                                                                                                                |
+| Production-bundle Playwright | **All 3 passed**, 1.6 minutes, fresh PostgreSQL schema; enterprise/privacy/offline, signup/security and mixed-layout/numeric workflow                                                                                       |
+| New mixed browser test       | Actual layout import/review/calibration, persisted mixed keys, native and browser numeric reads, partial-grid correction with original 30-point evidence, score/history, numeric CSV, dirty-download gating, 1440/768/390px |
+| Strict TypeScript + Vite/PWA | Passed, **57** precache entries / **23,211.07 KiB**; existing Zod comment/large-chunk warnings are nonfatal                                                                                                                 |
+| Formatting / Ruff            | Whole configured Prettier and Python lint/format passed                                                                                                                                                                     |
+| Dependencies/security        | `pip check` passed; Bandit found no issues; full npm audit reported **0 vulnerabilities**; both hash-locked runtime/development PyPI audits reported no known vulnerabilities                                               |
+
+An initial full Python run reached its 180-second command limit while running
+concurrently with the production build; it was not counted as a pass. A separate
+bounded rerun with limited numeric threads completed all 295 cases. Test and E2E
+PostgreSQL schemas were confirmed absent after normal shutdown. No existing school
+database or production credentials were used or reset.
+
+### Supplied-photo rehearsal (private, not a public fixture)
+
+The latest detector measured **351 circles** on the supplied photograph:
+20 four-option MCQ rows, five four-column/11-row numeric candidates and one
+five-column/10-row identity grid. A separate production-bundle browser rehearsal
+explicitly selected three columns / the ten digit rows, excluded the identity
+grid and accepted 25 uniquely numbered questions. Save/reload/edit of a measured
+origin, genuine PDF/PNG download, and reference-photo removal while preserving
+geometry all passed with no page errors. **All 25 keys stayed null.** Native
+OpenCV reread the generated blank PNG as 25 blank answers with no flags; sample
+marks from the reference were not printed. Updated desktop/mobile screenshots
+were inspected.
+
+Private photo/reference-containing evidence stays under ignored `.cache/qa/`,
+never in Git or CI's synthetic-artifact paths. This is one photo-specific
+**geometry** check, not arbitrary-photo or physical-camera/print certification.
+The shared committed fixture is anonymous synthetic geometry with print
+signature **`b6cec795`** in TypeScript, Python and Pydantic roundtrip.
+
+Fresh GitHub/Android build results must be checked for this source commit, not
+inferred from the previous Google-enabled APK. The deployed HTTPS app/backend
+must also be updated for a paired Android installation to use these changes.
+Physical device/chooser/print/erasure/lighting, live providers and permanent
+production deployment retain the earlier acceptance boundaries.

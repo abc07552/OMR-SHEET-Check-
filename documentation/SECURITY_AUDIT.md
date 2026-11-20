@@ -6,9 +6,38 @@ This is an engineering security review of this branch, **not an independent pene
 
 Use [PROGRESS.md](PROGRESS.md) for checkpoint results and the PR's current-head checks for CI. No real school database, private image corpus, production credentials, external bucket or mail account was used in these checks.
 
+## Three-digit and layout-scan follow-up
+
+Latest local checks: **295 backend tests** (SQLite / isolated PostgreSQL), **286
+frontend + 33 Node tests**, all **three** PostgreSQL/production-bundle browser
+workflows, TypeScript/build and formatting/Ruff passed. Fresh `pip check`, Bandit,
+full npm audit and runtime/development PyPI lock audits reported no broken
+requirements, Bandit findings or known package vulnerabilities. These remain
+scoped engineering checks, not independent security or physical-device approval.
+
+Reviewed additions: image type/size/pixel limits and bounded contour processing;
+key-independent measured geometry; explicit grid-type/three-column/ten-row mapping
+and acceptance; no automatic identity-grid interpretation; imported OCR disabled;
+contextual atomic numeric answer validation; mandatory ambiguous-column review;
+coordinate-preserving human corrections; count/type/option history locks in both
+backends; scan receipts bound to calibrated geometry and reading settings; fixed
+report columns for mixed answers. The supplied-photo import/save/reload/download
+rehearsal retained **blank keys**, and the downloaded blank form contained none
+of the sample photo's marks.
+
+**Reference-image privacy:** browser-only detection is not a device-only storage
+promise. Saving a reference embeds its normalized image in the authorized school
+workspace and potentially its offline vaults/backups. The dialog discloses this;
+prefer a blank sheet and remove the reference after calibration when unnecessary.
+Removal preserves geometry but does not erase past recovery points. Uploaded
+private photos and derived image-containing QA artifacts are ignored and excluded
+from the committed synthetic fixtures and CI artifact paths. This feature does
+not provide consent/retention management or a bubble roll-grid decoder. See
+[INTEGER_LAYOUT_SCANNING.md](INTEGER_LAYOUT_SCANNING.md).
+
 ## Google/signup/Drive follow-up
 
-The current local checkpoint passed **246 backend tests** on SQLite / isolated
+The prior auth checkpoint passed **246 backend tests** on SQLite / isolated
 PostgreSQL, **238 frontend + 30 preserved Node tests**, both production-bundle
 PostgreSQL browser workflows, TypeScript/build, Prettier/Ruff, `pip check`,
 **zero Bandit findings** (no `nosec` annotations), **zero npm advisories** and no

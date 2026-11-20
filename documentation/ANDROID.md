@@ -126,6 +126,22 @@ rotation, process death and sign-out/server-change races on representative phone
 with your actual Google project. Synthetic proof/claim tests and compilation do
 not constitute those physical-device or live-provider checks.
 
+## Three-digit questions and layout scanning
+
+The updated client includes **3-digit integer** keys and **Layout studio → Scan
+a layout**, with camera/gallery input, reviewed measured geometry and explicit
+numeric correction. See [INTEGER_LAYOUT_SCANNING.md](INTEGER_LAYOUT_SCANNING.md).
+For a connected school, deploy the updated **web client and FastAPI** together;
+an older hosted backend/client is not upgraded simply by installing a new APK.
+An updated bundled build also includes the feature in its separate device demo.
+
+Photo capture/file selection and report saving use the existing native chooser /
+Storage Access Framework paths; this feature adds no native OAuth or storage
+permission. A four-column/decimal external form still needs an explicit choice
+of three digit columns and ten digit rows. Compile/lint/JVM success does not
+certify physical camera capture, selected providers, print scale or real-sheet
+accuracy. Rehearse these on the intended devices before classroom use.
+
 ## Toolchain and local commands
 
 Pinned Capacitor core/Android/CLI **8.6.2** requires Node **22.13+**, **JDK 21**,

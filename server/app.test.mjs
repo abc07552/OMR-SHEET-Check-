@@ -334,3 +334,67 @@ test("production bootstrap is locked until the server setup token is supplied", 
     rmSync(dir2, { recursive: true, force: true });
   }
 });
+
+test("response types, count and MCQ options are immutable while results exist", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "omr-response-history-"));
+  const isolated = createApp({
+    dataDir: directory,
+    testing: true,
+    allowSetup: true,
+    secureCookies: false,
+  });
+  try {
+    const agent = request.agent(isolated);
+    const setup = await write(agent, "post", "/api/setup", {
+      name: "History QA",
+      email: "history@example.org",
+      password,
+      school: { name: "History school", code: "HIST" },
+    }).expect(201);
+    const sid = setup.body.user.memberships[0].schoolId,
+      url = `/api/schools/${sid}/workspace`;
+    let current = (await agent.get(url).expect(200)).body;
+    const e = current.workspace.exams[0];
+    e.answers = Array(e.questions).fill("A");
+    e.optionCount = 4;
+    e.published = true;
+    current.workspace.results = [
+      {
+        id: "history",
+        studentId: "unmatched",
+        name: "History",
+        roll: "10001",
+        section: "10 A",
+        examId: e.id,
+        answers: [...e.answers],
+        flagged: [],
+        confirmed: false,
+        identityReview: true,
+        createdAt: "2026-11-17",
+        source: "scan",
+      },
+    ];
+    await write(agent, "put", url, current).expect(200);
+    current = (await agent.get(url).expect(200)).body;
+    for (const kind of ["count", "type", "options"]) {
+      const changed = structuredClone(current),
+        exam = changed.workspace.exams[0];
+      changed.workspace.results = [];
+      if (kind === "count") {
+        exam.questions++;
+        exam.answers.push("A");
+      } else if (kind === "type") {
+        exam.questionTypes = [
+          "integer3",
+          ...Array(exam.questions - 1).fill("choice"),
+        ];
+        exam.answers[0] = "007";
+      } else exam.optionCount = 5;
+      await write(agent, "put", url, changed).expect(409);
+      assert.deepEqual((await agent.get(url).expect(200)).body, current);
+    }
+  } finally {
+    isolated.locals.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

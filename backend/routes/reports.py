@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from .. import models as m
 from ..config import ROOT
+from ..geometry import question_type
 from ..scoring import analytics, evaluate
 from ..security import allowed_exam, allowed_student, audit, current_user, db_session, membership
 from ..workspaces import load_workspace
@@ -202,11 +203,28 @@ def report(
                 "Correct %",
                 "Blank",
                 *list("ABCDE"[: exam.payload.get("optionCount", 4)]),
+                *(["Integer response frequencies"] if "integer3" in (exam.payload.get("questionTypes") or []) else []),
             ]
         ]
         for q in summary["questions"]:
             rows.append(
-                [q["question"], q["correct"], q["total"], round(q["difficulty"], 2), q["blank"], *q["options"].values()]
+                [
+                    q["question"],
+                    q["correct"],
+                    q["total"],
+                    round(q["difficulty"], 2),
+                    q["blank"],
+                    *[q["options"].get(a, 0) for a in "ABCDE"[: exam.payload.get("optionCount", 4)]],
+                    *(
+                        [
+                            "; ".join(f"{a}: {count}" for a, count in q["options"].items())
+                            if question_type(exam.payload, q["question"] - 1) == "integer3"
+                            else ""
+                        ]
+                        if "integer3" in (exam.payload.get("questionTypes") or [])
+                        else []
+                    ),
+                ]
             )
     elif kind == "subjects":
         rows = [["Subject", "Evaluated", "Average %"]]

@@ -1,6 +1,6 @@
 # Master-requirement acceptance map
 
-This is a **traceability and release-gate map**, not a declaration that all 19 stages are complete. Source is already implemented across these areas; the current work is integration, reliability and acceptance hardening on the existing draft PR. Existing Markly data and the Node baseline are preserved. The application must not be advertised as physically validated or permanently deployed merely because tests pass.
+This is a **traceability and release-gate map**, not a declaration that all 19 stages are complete. Source is already implemented across these areas; the current work is integration, reliability and acceptance hardening on the current working branch; the original integration PR was merged. Existing Markly data and the Node baseline are preserved. The application must not be advertised as physically validated or permanently deployed merely because tests pass.
 
 ## Stage map
 
@@ -44,6 +44,28 @@ verified with real RSA/X.509 and the official verifier. Actual Cloud credentials
 consent/revocation/quotas, production SMTP and Android external-browser return /
 process death still need an operator-configured domain, authorized users and
 physical devices. See [GOOGLE_AUTH_DRIVE.md](GOOGLE_AUTH_DRIVE.md).
+
+## Three-digit / layout-scan extension
+
+Stages 6–10 now include mixed MCQ/three-digit keys, reviewed camera/gallery
+layout detection, editable per-question geometry, 30-point numeric ink evidence,
+explicit uncertainty correction and whole-number exact scoring. Stages 12/14
+include whole-token frequency analysis and mixed CSV/XLSX/PDF reporting. Existing
+MCQ defaults/hashes/migration data and 500-question standard pagination are
+preserved. Count/type/MCQ-option history locks are enforced by both backends.
+
+**Executed locally:** 286 frontend, 33 preserved Node, 295 SQLite/PostgreSQL Python
+tests and all three production-bundle PostgreSQL Playwright workflows passed.
+An additional private rehearsal on the supplied photo passed reviewed mapping,
+calibration/save/reload, PDF/PNG generation and reference removal with no key
+inference. It is one geometry acceptance check, not general camera/ink accuracy.
+
+**Limits:** import is one image / at most 100 mapped questions; three digits means
+unsigned integers 0–999, not four-digit/decimal/sign support. External grid
+classification, numbering and intended columns/zero row require review; roll-grid
+decoding is not implemented. Reference photos enter the saved school workspace
+but are never printed. Representative private print/lighting/device/erasure and
+production hosting acceptance remain open. See [INTEGER_LAYOUT_SCANNING.md](INTEGER_LAYOUT_SCANNING.md).
 
 ## Current continuation priorities
 

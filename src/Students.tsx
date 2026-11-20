@@ -17,6 +17,9 @@ import {
   X,
 } from "lucide-react";
 import type { Exam, Option, Page, Result, Workspace } from "./data";
+import { questionType } from "./answers";
+import { getLayout } from "./layout";
+import { IntegerResponseEditor } from "./IntegerAnswerInput";
 import {
   downloadFile,
   formatNumber,
@@ -720,17 +723,26 @@ export function StudentDetail({
               </span>
             </div>
             <div>
-              {getOptions(exam).map((o) => (
-                <button
-                  className={answers[activeQuestion] === o ? "selected" : ""}
-                  key={o}
+              {questionType(exam, activeQuestion) === "integer3" ? (
+                <IntegerResponseEditor
+                  value={answers[activeQuestion]}
+                  question={activeQuestion}
                   disabled={!canEdit}
-                  onClick={() => setResponse(o)}
-                  aria-label={`Set question ${activeQuestion + 1} response to ${o}`}
-                >
-                  {o}
-                </button>
-              ))}
+                  onConfirm={setResponse}
+                />
+              ) : (
+                getOptions(exam).map((o) => (
+                  <button
+                    className={answers[activeQuestion] === o ? "selected" : ""}
+                    key={o}
+                    disabled={!canEdit}
+                    onClick={() => setResponse(o)}
+                    aria-label={`Set question ${activeQuestion + 1} response to ${o}`}
+                  >
+                    {o}
+                  </button>
+                ))
+              )}
               <button
                 className={`blank-option ${!answers[activeQuestion] ? "selected" : ""}`}
                 disabled={!canEdit}
@@ -757,9 +769,7 @@ export function StudentDetail({
           result={draft}
           school={workspace?.activeSchoolId || ""}
           question={activeQuestion}
-          questionsPerPage={
-            exam.layout?.questionsPerPage || Math.min(100, exam.questions)
-          }
+          questionsPerPage={getLayout(exam).questionsPerPage}
         />
         <p className="detail-caption">
           {result.source === "demo"

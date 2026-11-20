@@ -17,13 +17,16 @@ import {
 } from "lucide-react";
 import type { Exam, Workspace } from "./data";
 import { getOptions } from "./data";
+import { questionType } from "./answers";
+import LayoutScanner from "./LayoutScanner";
 import {
   DEFAULT_ANCHORS,
   HEIGHT,
   WIDTH,
   defaultLayout,
   getLayout,
-  layoutBubble,
+  layoutQuestionPoints,
+  regularRegion,
   layoutErrors,
   pageCount,
   pageQuestionCount,
@@ -66,6 +69,10 @@ export default function Templates({
     [logoBusy, setLogoBusy] = useState(false),
     [preview, setPreview] = useState(""),
     [previewError, setPreviewError] = useState("");
+  const [scanOpen, setScanOpen] = useState(false),
+    [importedExam, setImportedExam] = useState<Exam | null>(null),
+    [selectedQuestion, setSelectedQuestion] = useState(0);
+  const bubbleDrag = useRef<{ question: number; point: number } | null>(null);
   const upload = useRef<HTMLInputElement>(null),
     logoUpload = useRef<HTMLInputElement>(null),
     stage = useRef<SVGSVGElement>(null),
@@ -80,19 +87,20 @@ export default function Templates({
     setLayout(structuredClone(getLayout(exam)));
     setPage(0);
     setSelected("exam-title");
+    setImportedExam(null);
+    setSelectedQuestion(0);
   }, [exam]);
-  const draft = { ...exam, layout },
+  const design = importedExam || exam;
+  const draft = { ...design, layout },
     pages = pageCount(draft),
     safe = Math.min(page, pages - 1),
-    dirty =
-      !exam.layout ||
-      JSON.stringify(layout) !== JSON.stringify(getLayout(exam)),
+    dirty = !exam.layout || JSON.stringify(draft) !== JSON.stringify(exam),
     errors = [...layoutErrors(draft), ...(previewError ? [previewError] : [])],
     field = layout.fields.find((f) => f.id === selected);
   useEffect(() => {
     let active = true;
     setPreviewError("");
-    void createSheet({ ...exam, layout }, undefined, "", "", safe)
+    void createSheet({ ...design, layout }, undefined, "", "", safe)
       .then((canvas) => {
         if (active) setPreview(canvas.toDataURL("image/png"));
       })
@@ -107,7 +115,7 @@ export default function Templates({
     return () => {
       active = false;
     };
-  }, [layout, exam, safe]);
+  }, [layout, design, safe]);
   const update = (key: keyof OMRLayout, value: unknown) =>
     setLayout((l) => ({ ...l, [key]: value }));
   const patchField = (patch: Partial<SheetField>) =>
@@ -115,6 +123,39 @@ export default function Templates({
       ...l,
       fields: l.fields.map((f) => (f.id === selected ? { ...f, ...patch } : f)),
     }));
+  const selectedGeometry = layoutQuestionPoints(
+    selectedQuestion % layout.questionsPerPage,
+    draft,
+    Math.floor(selectedQuestion / layout.questionsPerPage),
+  );
+  const patchQuestion = (
+    points = selectedGeometry.points,
+    radius = selectedGeometry.radius,
+  ) =>
+    setLayout((l) => ({
+      ...l,
+      questionRegions: [
+        ...(l.questionRegions || []).filter(
+          (r) => r.question !== selectedQuestion,
+        ),
+        { question: selectedQuestion, points, radius },
+      ],
+    }));
+  const regularise = (gap?: number, rowGap?: number) => {
+    const p = selectedGeometry.points,
+      numeric = selectedGeometry.numeric;
+    const next = regularRegion(
+      selectedQuestion,
+      p[0].x,
+      p[0].y,
+      gap ?? p[numeric ? 10 : 1].x - p[0].x,
+      rowGap ?? (numeric ? p[1].y - p[0].y : 0),
+      selectedGeometry.radius,
+      numeric,
+      draft.optionCount || 4,
+    );
+    patchQuestion(next.points);
+  };
   const position = (e: React.PointerEvent) => {
     const r = stage.current!.getBoundingClientRect();
     return {
@@ -163,7 +204,7 @@ export default function Templates({
     ["startX", "First bubble X", 30, 1200, 1],
     ["startY", "First bubble Y", 30, 1650, 1],
     ["columnGap", "Column spacing", 40, 1100, 1],
-    ["rowGap", "Row spacing", 12, 100, 1],
+    ["rowGap", "Row spacing", 12, 1200, 1],
     ["optionGap", "Option spacing", 12, 160, 1],
     ["radius", "Bubble radius", 5, 25, 1],
     ["labelOffset", "Question label offset", 20, 160, 1],
@@ -265,7 +306,20 @@ export default function Templates({
           <>
             <button
               className="button button-secondary"
-              disabled={busy}
+              disabled={dirty && scanOpen}
+              onClick={() => setScanOpen(true)}
+            >
+              <ScanLine size={16} />
+              Scan a layout
+            </button>
+            <button
+              className="button button-secondary"
+              disabled={busy || dirty || logoBusy || scanOpen}
+              title={
+                dirty
+                  ? "Save this layout before downloading its template."
+                  : undefined
+              }
               onClick={downloadPDF}
             >
               <ArrowDownToLine size={16} />
@@ -283,7 +337,7 @@ export default function Templates({
                   "Layout saved. Print a new template and verify one sample before batch scanning.",
                 );
               }}
-              disabled={!dirty || !!errors.length || logoBusy}
+              disabled={!dirty || !!errors.length || logoBusy || scanOpen}
             >
               <Save size={16} />
               Save layout
@@ -302,13 +356,21 @@ export default function Templates({
       <div className="template-meta-strip">
         <span>
           <Layers size={16} />
-          {pages} printed {pages === 1 ? "page" : "pages"} · {exam.questions}{" "}
-          questions · A–{getOptions(exam).at(-1)}
+          {pages} printed {pages === 1 ? "page" : "pages"} · {draft.questions}{" "}
+          questions · A–{getOptions(draft).at(-1)}
+          {draft.questionTypes?.includes("integer3")
+            ? " + 3-digit integers"
+            : ""}
         </span>
         <SavedIndicator dirty={dirty} />
+        {dirty && (
+          <span className="small muted">
+            Save layout to enable template downloads.
+          </span>
+        )}
         <span>
           <ScanLine size={15} />{" "}
-          {layout.anchorMode === "markers"
+          {layout.anchorMode !== "page"
             ? "4-point registration"
             : "Paper-edge alignment"}
         </span>
@@ -336,6 +398,11 @@ export default function Templates({
                   {label}
                   <input
                     type="number"
+                    disabled={
+                      !!layout.questionRegions?.length &&
+                      layout.questionRegions.length >= draft.questions &&
+                      key !== "questionsPerPage"
+                    }
                     min={min}
                     max={max}
                     step={step}
@@ -395,9 +462,19 @@ export default function Templates({
                 }
               >
                 <option value="markers">Four dark registration squares</option>
+                <option value="fiducials">
+                  Outermost squares · repeated-marker layout
+                </option>
                 <option value="page">Paper edges (no squares)</option>
               </Select>
             </label>
+            {layout.questionRegions?.length ? (
+              <p className="small muted">
+                This sheet has per-question geometry. Use Question regions on
+                the right to edit measured points, spacing and radius; global
+                grid controls apply only to unmapped questions.
+              </p>
+            ) : null}
             <p className="small muted">
               Paper-edge mode needs the whole sheet on a contrasting background.
               Marker mode is more reliable for photographs.
@@ -408,7 +485,7 @@ export default function Templates({
                 if (
                   confirm("Reset geometry and fields to the standard layout?")
                 )
-                  setLayout(defaultLayout(exam));
+                  setLayout(defaultLayout(design));
               }}
             >
               <RotateCcw size={14} />
@@ -434,8 +511,13 @@ export default function Templates({
               </button>
               <button
                 className="icon-button"
-                title="Download saved page PNG"
+                title={
+                  dirty
+                    ? "Save this layout before downloading its template."
+                    : "Download saved page PNG"
+                }
                 aria-label="Download saved page PNG"
+                disabled={dirty || logoBusy || scanOpen}
                 onClick={() => {
                   void downloadTemplate(exam, safe).catch((error) =>
                     toast(
@@ -463,6 +545,36 @@ export default function Templates({
                   return;
                 }
                 const target = e.target as SVGElement;
+                if (
+                  target.dataset.question !== undefined &&
+                  target.dataset.point !== undefined
+                ) {
+                  const question = Number(target.dataset.question),
+                    point = Number(target.dataset.point);
+                  setSelectedQuestion(question);
+                  setSelected("");
+                  const geometry = layoutQuestionPoints(
+                    question % layout.questionsPerPage,
+                    draft,
+                    Math.floor(question / layout.questionsPerPage),
+                  );
+                  setLayout((l) => ({
+                    ...l,
+                    questionRegions: [
+                      ...(l.questionRegions || []).filter(
+                        (r) => r.question !== question,
+                      ),
+                      {
+                        question,
+                        points: geometry.points.map((p) => ({ ...p })),
+                        radius: geometry.radius,
+                      },
+                    ],
+                  }));
+                  bubbleDrag.current = { question, point };
+                  e.currentTarget.setPointerCapture(e.pointerId);
+                  return;
+                }
                 const id = target.dataset.field;
                 if (!id) {
                   setSelected("");
@@ -475,6 +587,26 @@ export default function Templates({
                 e.currentTarget.setPointerCapture(e.pointerId);
               }}
               onPointerMove={(e) => {
+                if (bubbleDrag.current) {
+                  const p = position(e),
+                    d = bubbleDrag.current;
+                  setLayout((l) => ({
+                    ...l,
+                    questionRegions: l.questionRegions?.map((r) =>
+                      r.question !== d.question
+                        ? r
+                        : {
+                            ...r,
+                            points: r.points.map((point, i) =>
+                              i !== d.point
+                                ? point
+                                : { x: Math.round(p.x), y: Math.round(p.y) },
+                            ),
+                          },
+                    ),
+                  }));
+                  return;
+                }
                 if (!drag.current) return;
                 const p = position(e),
                   d = drag.current;
@@ -503,9 +635,11 @@ export default function Templates({
               }}
               onPointerUp={() => {
                 drag.current = null;
+                bubbleDrag.current = null;
               }}
               onPointerCancel={() => {
                 drag.current = null;
+                bubbleDrag.current = null;
               }}
             >
               <image
@@ -519,36 +653,48 @@ export default function Templates({
                 width={WIDTH}
                 height={HEIGHT}
               />
-              {reference &&
-                layout.referenceImage &&
+              {((reference && layout.referenceImage) ||
+                selectedGeometry.numeric ||
+                layout.questionRegions?.length) &&
                 Array.from(
                   { length: pageQuestionCount(draft, safe) },
                   (_, q) => {
-                    const p = layoutBubble(q, draft);
+                    const p = layoutQuestionPoints(q, draft, safe),
+                      global = q + safe * layout.questionsPerPage,
+                      first = p.points[0];
                     return (
-                      <g key={q} fill="none" stroke="#13b895" strokeWidth="2">
+                      <g
+                        key={q}
+                        fill="none"
+                        stroke={
+                          selectedQuestion === global ? "#ed8400" : "#13b895"
+                        }
+                        strokeWidth="2"
+                      >
                         <text
-                          x={p.labelX}
-                          y={p.y + 5}
-                          fontSize="15"
+                          x={Math.max(25, first.x - p.radius - 35)}
+                          y={first.y - 16}
+                          fontSize="16"
                           fill="#00795b"
-                          stroke="none"
+                          stroke="white"
+                          paintOrder="stroke"
+                          strokeWidth="3"
                         >
-                          {q + 1 + safe * layout.questionsPerPage}
+                          {global + 1}
+                          {p.numeric ? " · 3d" : ""}
                         </text>
-                        {p.xs.map((x, i) =>
-                          layout.bubbleShape === "circle" ? (
-                            <circle key={i} cx={x} cy={p.y} r={p.radius} />
-                          ) : (
-                            <rect
-                              key={i}
-                              x={x - p.radius}
-                              y={p.y - p.radius}
-                              width={p.radius * 2}
-                              height={p.radius * 2}
-                            />
-                          ),
-                        )}
+                        {p.points.map((b, i) => (
+                          <circle
+                            key={i}
+                            cx={b.x}
+                            cy={b.y}
+                            r={p.radius}
+                            data-question={global}
+                            data-point={i}
+                            className="bubble-hit"
+                            fill="transparent"
+                          />
+                        ))}
                       </g>
                     );
                   },
@@ -567,13 +713,15 @@ export default function Templates({
                   </text>
                 </g>
               ))}
-              <rect
-                {...layout.rollRegion}
-                fill="#8a9fff22"
-                stroke="#6c80e7"
-                strokeWidth="2"
-                strokeDasharray="6 4"
-              />
+              {(layout.ocrEnabled !== false || tool === "roll") && (
+                <rect
+                  {...layout.rollRegion}
+                  fill="#8a9fff22"
+                  stroke="#6c80e7"
+                  strokeWidth="2"
+                  strokeDasharray="6 4"
+                />
+              )}
               {layout.fields
                 .filter((f) => f.visible)
                 .map((f) => (
@@ -623,6 +771,130 @@ export default function Templates({
           )}
         </section>
         <aside className="template-inspector">
+          <section className="card">
+            <div className="card-heading">
+              <h2>
+                <Crosshair size={16} />
+                Question regions
+              </h2>
+            </div>
+            <div className="form-fields">
+              <label>
+                Question to calibrate
+                <Select
+                  aria-label="Calibrate question region"
+                  value={selectedQuestion}
+                  onChange={(e) => {
+                    const q = Number(e.target.value);
+                    setSelectedQuestion(q);
+                    setPage(Math.floor(q / layout.questionsPerPage));
+                  }}
+                >
+                  {Array.from({ length: draft.questions }, (_, q) => (
+                    <option key={q} value={q}>
+                      Q{q + 1} ·{" "}
+                      {questionType(draft, q) === "integer3"
+                        ? "3-digit integer"
+                        : "MCQ"}
+                    </option>
+                  ))}
+                </Select>
+              </label>
+              <p className="small muted">
+                Drag any green bubble to correct its measured centre. Orange is
+                the selected question. Coordinates are saved per question, so
+                irregular spacing and mixed sections are supported.
+              </p>
+              <div className="form-two-columns">
+                {(["x", "y"] as const).map((axis) => (
+                  <label key={axis}>
+                    First bubble {axis}
+                    <input
+                      type="number"
+                      aria-label={`Question origin ${axis}`}
+                      value={selectedGeometry.points[0][axis]}
+                      onChange={(e) => {
+                        const delta =
+                          Number(e.target.value) -
+                          selectedGeometry.points[0][axis];
+                        if (Number.isFinite(delta))
+                          patchQuestion(
+                            selectedGeometry.points.map((p) => ({
+                              ...p,
+                              [axis]: Math.round((p[axis] + delta) * 10) / 10,
+                            })),
+                          );
+                      }}
+                    />
+                  </label>
+                ))}
+                <label>
+                  Bubble radius
+                  <input
+                    type="number"
+                    min="5"
+                    max="25"
+                    step="0.1"
+                    value={selectedGeometry.radius}
+                    onChange={(e) =>
+                      patchQuestion(undefined, Number(e.target.value))
+                    }
+                  />
+                </label>
+                <label>
+                  {selectedGeometry.numeric ? "Digit column gap" : "Option gap"}
+                  <input
+                    type="number"
+                    min="12"
+                    max="400"
+                    step="0.1"
+                    value={
+                      Math.round(
+                        (selectedGeometry.points[
+                          selectedGeometry.numeric ? 10 : 1
+                        ].x -
+                          selectedGeometry.points[0].x) *
+                          10,
+                      ) / 10
+                    }
+                    onChange={(e) => regularise(Number(e.target.value))}
+                  />
+                </label>
+                {selectedGeometry.numeric && (
+                  <label>
+                    Digit row gap
+                    <input
+                      type="number"
+                      min="12"
+                      max="100"
+                      step="0.1"
+                      value={
+                        Math.round(
+                          (selectedGeometry.points[1].y -
+                            selectedGeometry.points[0].y) *
+                            10,
+                        ) / 10
+                      }
+                      onChange={(e) =>
+                        regularise(undefined, Number(e.target.value))
+                      }
+                    />
+                  </label>
+                )}
+              </div>
+              <button
+                className="button button-secondary button-small"
+                onClick={() => regularise()}
+              >
+                Make this question a regular grid
+              </button>
+              <p className="small muted">
+                Numeric order: hundreds 0–9, tens 0–9, units 0–9. Select a
+                scanned layout’s three columns before importing. Print/scan a
+                test sheet after calibration.
+              </p>
+            </div>
+          </section>
           <section className="card">
             <div className="card-heading">
               <h2>
@@ -818,6 +1090,21 @@ export default function Templates({
                 <Upload size={14} />
                 Upload reference
               </button>
+              {layout.referenceImage && (
+                <button
+                  className="text-button danger-text"
+                  onClick={() => {
+                    if (
+                      confirm(
+                        "Remove the reference photo from this layout? Measured geometry is kept. Existing backups may still contain the old photo.",
+                      )
+                    )
+                      update("referenceImage", undefined);
+                  }}
+                >
+                  Remove reference photo
+                </button>
+              )}
               <div className="calibration-tools">
                 {(
                   [
@@ -831,6 +1118,11 @@ export default function Templates({
                 ).map(([t, label]) => (
                   <button
                     key={t}
+                    disabled={
+                      !!layout.questionRegions?.length &&
+                      layout.questionRegions.length >= draft.questions &&
+                      ["first", "option", "row", "column"].includes(t)
+                    }
                     className={tool === t ? "active" : ""}
                     onClick={() => setTool(tool === t ? "select" : t)}
                   >
@@ -847,6 +1139,19 @@ export default function Templates({
                     : "Click the matching bubble centre or region origin on the sheet."}
               </p>
               <h3>Roll OCR crop</h3>
+              <label className="checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={layout.ocrEnabled !== false}
+                  onChange={(e) => update("ocrEnabled", e.target.checked)}
+                />
+                Enable roll OCR for this layout
+              </label>
+              <p className="small muted">
+                Imported layouts start with OCR off. Calibrate the handwritten
+                roll-number box first; a bubble roll grid is not a text crop.
+                Otherwise enter the roll manually while scanning.
+              </p>
               <div className="form-two-columns">
                 {(["x", "y", "width", "height"] as const).map((k) => (
                   <label key={k}>
@@ -882,6 +1187,24 @@ export default function Templates({
           </section>
         </aside>
       </div>
+      {scanOpen && (
+        <LayoutScanner
+          exam={draft}
+          locked={workspace.results.some((r) => r.examId === exam.id)}
+          onClose={() => setScanOpen(false)}
+          onApply={(next) => {
+            setImportedExam(next);
+            setLayout(next.layout!);
+            setPage(0);
+            setSelectedQuestion(0);
+            setReference(true);
+            setScanOpen(false);
+            toast(
+              "Detected geometry opened as a draft. Check the editable bubbles, then save. No answers were read from the reference.",
+            );
+          }}
+        />
+      )}
     </>
   );
 }

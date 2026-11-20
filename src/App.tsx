@@ -1,3 +1,4 @@
+import { questionType } from "./answers";
 import {
   lazy,
   Suspense,
@@ -313,6 +314,21 @@ function WorkspaceApp() {
   const updateExam = (e: Exam) => {
     if (!allowedPage("keys")) {
       toast("Your account cannot change examinations or answer keys.");
+      return;
+    }
+    const previous = workspace.exams.find((old) => old.id === e.id);
+    if (
+      previous &&
+      workspace.results.some((r) => r.examId === e.id) &&
+      (previous.questions !== e.questions ||
+        (previous.optionCount || 4) !== (e.optionCount || 4) ||
+        e.answers.some(
+          (_, q) => questionType(previous, q) !== questionType(e, q),
+        ))
+    ) {
+      toast(
+        "Question types, counts and MCQ options are locked after results exist. Create a new assessment for a different sheet.",
+      );
       return;
     }
     updateScoped({

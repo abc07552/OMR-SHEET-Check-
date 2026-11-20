@@ -69,8 +69,9 @@ Advanced overrides:
 
 ### What the committed browser test asserts
 
-`e2e/enterprise.spec.ts` contains an ordered enterprise workflow and a second
-real password-registration/security workflow. The helper explicitly enables
+`e2e/enterprise.spec.ts` contains an ordered enterprise workflow, a real
+password-registration/security workflow and a mixed-integer/layout-import
+workflow. The helper explicitly enables
 public signup for **disposable QA only**, and explicitly leaves Google
 credentials empty. Rerun the **whole file with a fresh helper**, not a middle step
 against yesterday's database.
@@ -256,3 +257,44 @@ remembered origin; server/DNS/JavaScript failure with native Connection recovery
 logout and cookie clearing; pending encrypted queue recovery at its original
 origin; independent schools/demo; camera/chooser/exports and APK upgrade. Do not
 claim these physical checks from compilation, mocked UI tests or JVM policy tests.
+
+## Three-digit and scanned-layout acceptance
+
+The full local continuation passed **286 frontend / 33 preserved Node / 295
+Python tests** (SQLite plus isolated PostgreSQL) and **all three** fresh
+PostgreSQL/production-bundle browser workflows. See [PROGRESS.md](PROGRESS.md)
+for executed checks, and [INTEGER_LAYOUT_SCANNING.md](INTEGER_LAYOUT_SCANNING.md)
+for user steps, numerical semantics, limits and privacy.
+
+```sh
+npx vitest run src/integerLayout.test.ts src/IntegerAnswerInput.test.tsx
+.venv/bin/pytest -q backend/tests/test_integer_omr.py
+# Build first; the helper creates a fresh disposable database:
+OMR_E2E_ALLOW_SETUP=1 npx playwright test -g 'scanned mixed layouts'
+```
+
+The new browser test actually imports a synthetic repeated-square sheet, reviews
+its five 4×11 grids and excluded roll grid, selects the intended digit columns /
+zero row, renumbers and accepts a draft, saves/reloads measured geometry, enters
+mixed keys, downloads a real PDF, runs native and browser numeric ink reads and
+explicitly confirms an incomplete grid as `007`. It checks retained 30-point
+measurements, persisted manual evidence/history, result-type locks, numeric
+analytics/CSV column alignment, dirty-layout download gates and mobile widths.
+
+Native regressions additionally verify page-specific outline registration using
+either the explicit page hint or a printed QR page identifier. The shared
+synthetic fixture has signature `b6cec795` in TypeScript and Python, including
+Pydantic roundtrip. Historical MCQ tests and migration source-preservation checks
+remain enabled. A schema-default regression during this continuation was fixed by
+keeping absent new layout fields absent in legacy serialization, not by weakening
+the migration assertion.
+
+A separate private browser rehearsal on the supplied photo found 351 circles,
+20 MCQ rows, five 4×11 numeric candidates and one excluded 5×10 identity grid.
+Reviewed mapping, save/reload/coordinate editing, genuine PDF/PNG download and
+reference-photo removal passed. Keys stayed null, and native CV reread the printed
+blank template as 25 blank responses with no flags. The photo and derived
+reference-containing artifacts stay ignored; **never add them to public fixtures
+or CI evidence uploads**. Only anonymous synthetic fixtures are committed.
+This single-photo geometry check is not a general optical-accuracy benchmark or
+physical-device/camera/print certification.

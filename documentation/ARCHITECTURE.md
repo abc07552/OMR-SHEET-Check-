@@ -59,6 +59,37 @@ Both browser OpenCV.js and server OpenCV measure real images. The Python engine 
 
 The server's Tesseract integration is optional and explicitly reports when its executable is absent. Local browser Tesseract remains functional independently. This is an optical/classical-CV product; no untrained "AI accuracy" claim is made.
 
+## Mixed question types and reviewed layout import
+
+Optional per-question `questionTypes` defaults historical data to `choice` and
+adds `integer3`. Responses and alternate keys use atomic three-character strings
+`000`–`999`; whole-token exact grading never awards per-digit partial credit.
+Contextual frontend/Pydantic/legacy schemas reject numerical MCQ responses,
+choice-valued integer responses and multiple numeric tokens. Integer ink evidence
+contains 30 measured coordinates; automatic acceptance needs one clear digit in
+each column. Explicit correction retains these measurements and updates response,
+selection and verified metadata coherently.
+
+`src/layoutVision.ts` detects actual circular contours / Hough edge evidence and
+solid-square registration. `layoutImport.ts` rectifies a bounded image, groups
+measured rows/lattices and requires reviewed grid classification, column/row
+selection and unique question numbering. Roll grids are not decoded or keyed.
+Accepted imports become editable per-question `questionRegions`, allowing mixed,
+irregular layouts. One imported image maps at most 100 questions; standard
+500-question layouts remain multipage. Reference images never participate in
+printing, answer inference or geometry hashes, but saving them persists private
+school-workspace data. Imported OCR starts disabled.
+
+`src/layout.ts` / `backend/geometry.py` share default geometry and deterministic
+print signatures, preserving historical MCQ hashes. Bubble types/points enter new
+signatures. Readability registration uses the requested or QR-identified page's
+actual regions, never the answer key. Scan operation receipts are bound to print
+geometry and threshold/OCR settings, so changing calibration cannot replay an old
+read as though it used the new settings. Count/type/MCQ-option changes are rejected
+while active results exist; key corrections still append evaluations. All data
+uses existing JSON payload/template/evidence storage; no destructive database
+migration is required. See [INTEGER_LAYOUT_SCANNING.md](INTEGER_LAYOUT_SCANNING.md).
+
 ## Storage / cloud
 
 `DATABASE_URL=postgresql+psycopg://...` selects PostgreSQL. The enterprise Docker/Compose topology uses explicit Alembic migrations, a non-root Python runtime, a private non-superuser PostgreSQL role and a same-origin Caddy HTTPS ingress. With automatic migrations disabled, startup requires the exact application migration head before accepting traffic. See `DEPLOYMENT.md` for operational/verification limits. `S3_BUCKET`, region, optional endpoint and standard AWS credentials select S3-compatible object storage; otherwise encrypted local objects are used. Remote SMTP enables email recovery. Without these settings the application is a local server, **not a deployed cloud service**. A QA PostgreSQL 16.2 binary supplied by an optional test-only wheel is isolated on a private Unix socket; it must not be used as a production database.

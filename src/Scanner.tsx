@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import type { Exam, Option, Page, Result, Workspace } from "./data";
 import { getOptions } from "./data";
+import { normaliseInteger, questionType } from "./answers";
 import { getLayout, pageCount, sheetSignature } from "./layout";
 import { createSheet, downloadTemplatePDF, templatePDF } from "./omr";
 import { pdfImages, scanPageFile } from "./scanEngine";
@@ -454,7 +455,9 @@ export default function Scanner({
         roll = n ? "13002" : "13001",
         answers: (Option | null)[] = exam.answers.map((a, q) =>
           (q + n) % (n ? 4 : 7) === 0
-            ? getOptions(exam).find((o) => o !== a)!
+            ? questionType(exam, q) === "integer3"
+              ? normaliseInteger(String((Number(a) + 1) % 1000))!
+              : getOptions(exam).find((o) => o !== a)!
             : a,
         );
       if (pdf) {

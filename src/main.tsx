@@ -13,6 +13,7 @@ import "./styles.css";
 import "./dark.css";
 import "./enterprise.css";
 import "./accounts.css";
+import "./layoutStudio.css";
 
 initializeTheme();
 

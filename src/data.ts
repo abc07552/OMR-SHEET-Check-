@@ -1,8 +1,10 @@
-import { isEmbeddedRaster, layoutErrors } from "./layout";
+import { isEmbeddedRaster, layoutErrors, getLayout } from "./layout";
 import type { OMRLayout } from "./layout";
 import { scoreLocally, ScoringDecimal } from "./scoring";
 
-export type Option = "A" | "B" | "C" | "D" | "E";
+import type { Option, QuestionType } from "./answers";
+import { validAnswer, validSelection, questionType } from "./answers";
+export type { Option, QuestionType } from "./answers";
 export const OPTIONS: Option[] = ["A", "B", "C", "D", "E"];
 export const getOptions = (exam: Pick<Exam, "optionCount">): Option[] =>
   OPTIONS.slice(0, exam.optionCount || 4);
@@ -44,6 +46,8 @@ export interface AnswerDetection {
   confidence?: number;
   coordinates: {
     option?: Option;
+    digitColumn?: number;
+    digit?: number;
     x?: number;
     y?: number;
     alignedX?: number;
@@ -87,6 +91,7 @@ export interface Student {
 export interface Exam {
   schoolId?: string;
   optionCount?: 2 | 3 | 4 | 5;
+  questionTypes?: QuestionType[];
   code?: string;
   batch?: string;
   resultsPublished?: boolean;
@@ -309,7 +314,10 @@ export function isValidWorkspace(value: unknown): value is Workspace {
   const validAnswers = (answers: unknown, count: number) =>
     Array.isArray(answers) &&
     answers.length === count &&
-    answers.every((a) => a === null || OPTIONS.includes(a));
+    answers.every(
+      (a) =>
+        a === null || (typeof a === "string" && /^(?:[A-E]|[0-9]{3})$/.test(a)),
+    );
   if (
     v.version !== 1 ||
     typeof v.school !== "string" ||
@@ -357,7 +365,27 @@ export function isValidWorkspace(value: unknown): value is Workspace {
   )
     return false;
   if (
-    v.exams.some((e) => e.answers.some((a) => a && !getOptions(e).includes(a)))
+    v.exams.some(
+      (e) =>
+        (e.questionTypes !== undefined &&
+          (!Array.isArray(e.questionTypes) ||
+            e.questionTypes.length !== e.questions ||
+            e.questionTypes.some(
+              (t) => !["choice", "integer3"].includes(t),
+            ))) ||
+        e.answers.some((a, q) => !validAnswer(e, q, a)) ||
+        (e.questionSets !== undefined &&
+          (!Array.isArray(e.questionSets) ||
+            e.questionSets.some(
+              (s) =>
+                !s ||
+                !Array.isArray(s.answers) ||
+                s.answers.length !== e.questions ||
+                s.answers.some(
+                  (a, q) => a !== null && !validSelection(e, q, a),
+                ),
+            ))),
+    )
   )
     return false;
   if (
@@ -462,7 +490,74 @@ export function isValidWorkspace(value: unknown): value is Workspace {
         typeof r.roll === "string" &&
         typeof r.section === "string" &&
         validAnswers(r.answers, exam.questions) &&
-        !r.answers.some((a) => a && !getOptions(exam).includes(a)) &&
+        !r.answers.some((a, q) => !validAnswer(exam, q, a)) &&
+        (r.detectedOptions === undefined ||
+          (Array.isArray(r.detectedOptions) &&
+            r.detectedOptions.length === exam.questions &&
+            r.detectedOptions.every(
+              (v, q) =>
+                validSelection(exam, q, v) &&
+                r.answers[q] === (v.length === 1 ? v[0] : null),
+            ))) &&
+        (r.answerMeta === undefined ||
+          (Array.isArray(r.answerMeta) &&
+            r.answerMeta.length <= exam.questions &&
+            r.answerMeta.every((m) => m && typeof m === "object") &&
+            new Set(r.answerMeta.map((m) => m.question)).size ===
+              r.answerMeta.length &&
+            r.answerMeta.every(
+              (m) =>
+                m &&
+                Number.isInteger(m.question) &&
+                m.question >= 0 &&
+                m.question < exam.questions &&
+                validSelection(exam, m.question, m.selected) &&
+                [
+                  "blank",
+                  "filled",
+                  "partial",
+                  "erased",
+                  "multiple",
+                  "uncertain",
+                  "invalid",
+                  "manual",
+                ].includes(m.status) &&
+                typeof m.verified === "boolean" &&
+                (m.confidence === undefined ||
+                  (Number.isFinite(m.confidence) &&
+                    m.confidence >= 0 &&
+                    m.confidence <= 100)) &&
+                Array.isArray(m.coordinates) &&
+                m.coordinates.length <= 30 &&
+                m.coordinates.every(
+                  (c) =>
+                    c &&
+                    typeof c === "object" &&
+                    [
+                      c.x,
+                      c.y,
+                      c.alignedX,
+                      c.alignedY,
+                      c.radius,
+                      c.inkRatio,
+                    ].every(
+                      (v) =>
+                        v === undefined ||
+                        (Number.isFinite(v) && Math.abs(v) < 1e8),
+                    ) &&
+                    (c.digitColumn === undefined ||
+                      (Number.isInteger(c.digitColumn) &&
+                        c.digitColumn >= 0 &&
+                        c.digitColumn < 3)) &&
+                    (c.digit === undefined ||
+                      (Number.isInteger(c.digit) &&
+                        c.digit >= 0 &&
+                        c.digit <= 9)),
+                ) &&
+                (!r.detectedOptions ||
+                  JSON.stringify(m.selected) ===
+                    JSON.stringify(r.detectedOptions[m.question])),
+            ))) &&
         (r.pageTotal === undefined ||
           (Number.isInteger(r.pageTotal) &&
             r.pageTotal >= 1 &&
@@ -477,9 +572,7 @@ export function isValidWorkspace(value: unknown): value is Workspace {
                 p <
                   (r.pageTotal ||
                     Math.ceil(
-                      exam.questions /
-                        (exam.layout?.questionsPerPage ||
-                          Math.min(100, exam.questions)),
+                      exam.questions / getLayout(exam).questionsPerPage,
                     )),
             ))) &&
         (r.layoutSignature === undefined ||
@@ -563,7 +656,19 @@ export function questionStats(results: Result[], exam: Exam) {
     .map((r) => gradeResult(r, exam))
     .filter((g) => !g.needsReview);
   return exam.answers.map((answer, i) => {
-    const counts = getOptions(exam).map((option) => ({
+    const choices: Option[] =
+      questionType(exam, i) === "integer3"
+        ? [
+            ...new Set([
+              ...(answer ? [answer] : []),
+              ...valid.flatMap((g) => [
+                ...(g.questions[i]?.selected || []),
+                ...(g.questions[i]?.expected || []),
+              ]),
+            ]),
+          ].sort()
+        : getOptions(exam);
+    const counts = choices.map((option) => ({
       option,
       count: valid.filter((g) => g.questions[i]?.selected.includes(option))
         .length,
@@ -675,7 +780,8 @@ function validLayout(l: OMRLayout): boolean {
     l.threshold >= 0.15 &&
     l.threshold <= 0.95 &&
     ["circle", "square"].includes(l.bubbleShape) &&
-    ["markers", "page"].includes(l.anchorMode) &&
+    (l.ocrEnabled === undefined || typeof l.ocrEnabled === "boolean") &&
+    ["markers", "page", "fiducials"].includes(l.anchorMode) &&
     Array.isArray(l.anchors) &&
     l.anchors.length === 4 &&
     l.anchors.every(
@@ -688,6 +794,20 @@ function validLayout(l: OMRLayout): boolean {
         p.y >= 0 &&
         p.y <= 1754,
     ) &&
+    (l.questionRegions === undefined ||
+      (Array.isArray(l.questionRegions) &&
+        l.questionRegions.length <= 500 &&
+        l.questionRegions.every(
+          (r) =>
+            r &&
+            Number.isInteger(r.question) &&
+            Number.isFinite(r.radius) &&
+            Array.isArray(r.points) &&
+            r.points.length <= 30 &&
+            r.points.every(
+              (p) => p && Number.isFinite(p.x) && Number.isFinite(p.y),
+            ),
+        ))) &&
     Array.isArray(l.fields) &&
     l.fields.length <= 40 &&
     l.fields.every(

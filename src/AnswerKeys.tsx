@@ -16,6 +16,10 @@ import {
 } from "lucide-react";
 import type { Exam, Option, Page, Workspace } from "./data";
 import { getOptions } from "./data";
+import { questionType, validAnswer } from "./answers";
+import type { QuestionType } from "./answers";
+import { changeQuestionTypes, layoutErrors } from "./layout";
+import IntegerAnswerInput from "./IntegerAnswerInput";
 import { downloadTemplatePDF } from "./omr";
 import { Modal, PageHeading, SavedIndicator, Select } from "./components";
 import { ExamBar } from "./Overview";
@@ -47,9 +51,37 @@ export default function AnswerKeys({
   const [pasteError, setPasteError] = useState("");
   const [clearOpen, setClearOpen] = useState(false);
   const [keyPage, setKeyPage] = useState(0);
+  const [typeFrom, setTypeFrom] = useState(1),
+    [typeTo, setTypeTo] = useState(exam.questions),
+    [rangeType, setRangeType] = useState<QuestionType>("integer3");
+  const typesLocked = workspace.results.some((r) => r.examId === exam.id);
+  const changeTypes = (from: number, to: number, type: QuestionType) => {
+    if (typesLocked) {
+      toast(
+        "Create a new assessment to change question types after results exist.",
+      );
+      return;
+    }
+    if (
+      !Number.isInteger(from) ||
+      !Number.isInteger(to) ||
+      from < 1 ||
+      to < from ||
+      to > draft.questions
+    ) {
+      toast("Choose a valid question range.");
+      return;
+    }
+    const types = Array.from({ length: draft.questions }, (_, q) =>
+      q >= from - 1 && q < to ? type : questionType(draft, q),
+    );
+    setDraft(changeQuestionTypes(draft, types));
+  };
   useEffect(() => {
     setDraft({ ...exam, answers: [...exam.answers] });
     setKeyPage(0);
+    setTypeFrom(1);
+    setTypeTo(exam.questions);
   }, [exam]);
   const dirty = JSON.stringify(draft) !== JSON.stringify(exam);
   const completed = draft.answers.filter(Boolean).length;
@@ -100,6 +132,11 @@ export default function AnswerKeys({
       );
       return;
     }
+    const geometryErrors = layoutErrors(draft);
+    if (geometryErrors.length) {
+      toast(geometryErrors[0]);
+      return;
+    }
     onSave({
       ...draft,
       title: draft.title.trim(),
@@ -119,16 +156,27 @@ export default function AnswerKeys({
       ),
     }));
   const applyPaste = () => {
-    const values = paste
-      .toUpperCase()
-      .replace(/[\s,;|\d.():\-]/g, "")
-      .split("");
+    const values = draft.questionTypes?.includes("integer3")
+      ? paste
+          .toUpperCase()
+          .trim()
+          .split(/[\s,;|]+/)
+          .filter(Boolean)
+          .map((v, q) =>
+            questionType(draft, q) === "integer3" && /^[0-9]{1,3}$/.test(v)
+              ? v.padStart(3, "0")
+              : v,
+          )
+      : paste
+          .toUpperCase()
+          .replace(/[\s,;|\d.():\-]/g, "")
+          .split("");
     if (
       values.length !== draft.questions ||
-      values.some((v) => !getOptions(draft).includes(v as Option))
+      values.some((v, q) => !validAnswer(draft, q, v))
     ) {
       setPasteError(
-        `Enter exactly ${draft.questions} answers using only ${getOptions(draft).join(", ")}. You entered ${values.length}.`,
+        `Enter exactly ${draft.questions} answers using ${getOptions(draft).join(", ")} for MCQs and 0–999 for integer questions. You entered ${values.length}.`,
       );
       return;
     }
@@ -233,18 +281,48 @@ export default function AnswerKeys({
                       {String(i + 1).padStart(2, "0")}
                     </span>
                     <div>
-                      {getOptions(draft).map((o) => (
-                        <button
-                          key={o}
-                          aria-label={`Question ${i + 1}, option ${o}`}
-                          aria-pressed={answer === o}
-                          className={answer === o ? "selected" : ""}
-                          onClick={() => choose(i, o)}
-                        >
-                          {o}
-                        </button>
-                      ))}
+                      {questionType(draft, i) === "integer3" ? (
+                        <IntegerAnswerInput
+                          label={`Question ${i + 1}, three-digit integer answer`}
+                          value={answer}
+                          onChange={(value) =>
+                            setDraft((d) => ({
+                              ...d,
+                              answers: d.answers.map((a, q) =>
+                                q === i ? value : a,
+                              ),
+                            }))
+                          }
+                        />
+                      ) : (
+                        getOptions(draft).map((o) => (
+                          <button
+                            key={o}
+                            aria-label={`Question ${i + 1}, option ${o}`}
+                            aria-pressed={answer === o}
+                            className={answer === o ? "selected" : ""}
+                            onClick={() => choose(i, o)}
+                          >
+                            {o}
+                          </button>
+                        ))
+                      )}
                     </div>
+                    <Select
+                      aria-label={`Question ${i + 1} answer type`}
+                      disabled={typesLocked}
+                      value={questionType(draft, i)}
+                      onChange={(e) =>
+                        changeTypes(
+                          i + 1,
+                          i + 1,
+                          e.target.value as QuestionType,
+                        )
+                      }
+                    >
+                      <option value="choice">MCQ</option>
+                      <option value="integer3">3-digit integer</option>
+                    </Select>
                   </div>
                 );
               })}
@@ -458,11 +536,76 @@ export default function AnswerKeys({
           </section>
           <button
             className="button button-secondary full-width"
+            disabled={dirty}
+            title={
+              dirty
+                ? "Save the key and types before opening Layout Studio"
+                : undefined
+            }
             onClick={() => navigate("templates")}
           >
             Open layout studio
             <ArrowRight size={14} />
           </button>
+          <section className="card">
+            <div className="card-heading">
+              <h2>Question answer types</h2>
+            </div>
+            <div className="form-fields">
+              <p className="small muted">
+                Mix MCQs and three-digit integers. Integer bubbles are three
+                columns of 0–9; 7 is entered as 007. No signs or decimal row.
+                Changing types clears those keys and regenerates the
+                layout—check it before printing.
+              </p>
+              <div className="form-two-columns">
+                <label>
+                  From question
+                  <input
+                    type="number"
+                    min="1"
+                    max={draft.questions}
+                    value={typeFrom}
+                    onChange={(e) => setTypeFrom(Number(e.target.value))}
+                  />
+                </label>
+                <label>
+                  To question
+                  <input
+                    type="number"
+                    min="1"
+                    max={draft.questions}
+                    value={typeTo}
+                    onChange={(e) => setTypeTo(Number(e.target.value))}
+                  />
+                </label>
+              </div>
+              <label>
+                Answer type
+                <Select
+                  value={rangeType}
+                  disabled={typesLocked}
+                  onChange={(e) => setRangeType(e.target.value as QuestionType)}
+                >
+                  <option value="choice">Multiple choice</option>
+                  <option value="integer3">3-digit integer · 000–999</option>
+                </Select>
+              </label>
+              <button
+                className="button button-secondary"
+                disabled={typesLocked}
+                onClick={() => changeTypes(typeFrom, typeTo, rangeType)}
+              >
+                Apply type to range
+              </button>
+              {typesLocked && (
+                <p className="small muted">
+                  Types are locked because results already exist. Create a new
+                  assessment for a different sheet.
+                </p>
+              )}
+            </div>
+          </section>
           <section className="key-tip">
             <Sparkles size={20} />
             <h3>One key. Endless possibilities.</h3>
@@ -512,7 +655,8 @@ export default function AnswerKeys({
           <div className="modal-body">
             <p className="muted">
               Paste {draft.questions} answers in order, separated by spaces,
-              commas, or new lines. For example: A, C, B, D.
+              commas, or new lines. For example: A, C, 042, 007 for a mixed key.
+              Use a whole integer token, not separate digit answers.
             </p>
             <label className="field-label">
               Your correct answers
@@ -594,6 +738,7 @@ export function NewExamModal({
   const [subject, setSubject] = useState("Physics");
   const [count, setCount] = useState("50");
   const [options, setOptions] = useState<2 | 3 | 4 | 5>(5);
+  const [integer, setInteger] = useState(false);
   return (
     <Modal title="A fresh start, one answer at a time." onClose={onClose}>
       <form
@@ -614,6 +759,9 @@ export function NewExamModal({
             date: new Date().toISOString().slice(0, 10),
             questions: Number(count),
             optionCount: options,
+            ...(integer
+              ? { questionTypes: Array(Number(count)).fill("integer3") }
+              : {}),
             marksCorrect: 2,
             negativeMarks: 0,
             passPercentage: 40,
@@ -667,15 +815,18 @@ export function NewExamModal({
             <label>
               Answer options
               <Select
-                value={options}
-                onChange={(e) =>
-                  setOptions(Number(e.target.value) as 2 | 3 | 4 | 5)
-                }
+                value={integer ? "integer3" : options}
+                onChange={(e) => {
+                  setInteger(e.target.value === "integer3");
+                  if (e.target.value !== "integer3")
+                    setOptions(Number(e.target.value) as 2 | 3 | 4 | 5);
+                }}
               >
                 <option value={2}>2 options · A–B</option>
                 <option value={3}>3 options · A–C</option>
                 <option value={4}>A–D · four options</option>
                 <option value={5}>A–E · five options</option>
+                <option value="integer3">3-digit integer · 000–999</option>
               </Select>
             </label>
             <p className="small muted">

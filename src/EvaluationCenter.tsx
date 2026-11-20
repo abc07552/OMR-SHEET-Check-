@@ -12,6 +12,7 @@ import {
 import { z } from "zod";
 import type { Exam, Option, Workspace } from "./data";
 import { getOptions, gradeResult } from "./data";
+import { questionType, normaliseInteger } from "./answers";
 import { defaultMarkingRules } from "./scoring";
 import { api, useSession } from "./session";
 import { ExamBar } from "./Overview";
@@ -104,20 +105,28 @@ export default function EvaluationCenter({
         ) ||
         tokens.length !== exam.questions ||
         tokens.some(
-          (t) =>
+          (t, q) =>
             t !== "-" &&
-            ([...t].some((o) => !getOptions(exam).includes(o as Option)) ||
-              new Set(t).size !== t.length),
+            (questionType(exam, q) === "integer3"
+              ? !normaliseInteger(t)
+              : [...t].some((o) => !getOptions(exam).includes(o as Option)) ||
+                new Set(t).size !== t.length),
         )
       ) {
         setError(
-          `Each set needs a unique code and exactly ${exam.questions} responses. Use AB for an exact multi-answer key and - for unkeyed questions.`,
+          `Each set needs a unique code and exactly ${exam.questions} responses. Use AB for an exact MCQ multi-answer key, 000–999 for integers, and - for unkeyed questions.`,
         );
         return;
       }
       variants.push({
         code: set.code.trim().toUpperCase(),
-        answers: tokens.map((t) => (t === "-" ? null : ([...t] as Option[]))),
+        answers: tokens.map((t, q) =>
+          t === "-"
+            ? null
+            : questionType(exam, q) === "integer3"
+              ? [normaliseInteger(t)!]
+              : ([...t] as Option[]),
+        ),
       });
     }
     onSave({
@@ -410,8 +419,8 @@ export default function EvaluationCenter({
             <div>
               <h2>Question-set keys</h2>
               <p>
-                Optional alternate sets. Separate responses with spaces; AB is a
-                two-option correct key.
+                Optional alternate sets. Separate responses with spaces; use
+                000–999 for integer questions; AB is a two-option correct key.
               </p>
             </div>
             <button

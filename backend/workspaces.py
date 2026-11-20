@@ -7,6 +7,7 @@ from fastapi import HTTPException
 from sqlalchemy import select, update
 
 from . import models as m
+from .geometry import question_type
 from .schemas import Workspace
 from .scoring import evaluate
 from .security import audit, canonical, fingerprint
@@ -111,6 +112,7 @@ def _key_data(e):
             "questions",
             "subjects",
             "optionCount",
+            "questionTypes",
         )
     }
 
@@ -228,6 +230,13 @@ def persist_workspace(db, school_id, value, actor_id=None):
         )
     db.flush()
     current_exams = {r.id: r for r in db.scalars(select(m.Examination).where(m.Examination.school_id == school_id))}
+    exams_with_results = set(
+        db.scalars(
+            select(m.ResultRecord.exam_id)
+            .where(m.ResultRecord.school_id == school_id, m.ResultRecord.deleted_at.is_(None))
+            .distinct()
+        )
+    )
     exam_ids = {r["id"] for r in w["exams"]}
     changed_exams = set()
     for identifier, obj in current_exams.items():
@@ -235,6 +244,20 @@ def persist_workspace(db, school_id, value, actor_id=None):
             obj.deleted_at = obj.deleted_at or m.now()
     for row in w["exams"]:
         obj = current_exams.get(row["id"])
+        if (
+            obj
+            and row["id"] in exams_with_results
+            and (
+                row["questions"] != obj.payload["questions"]
+                or row.get("optionCount", 4) != obj.payload.get("optionCount", 4)
+                or [question_type(row, q) for q in range(row["questions"])]
+                != [question_type(obj.payload, q) for q in range(obj.payload["questions"])]
+            )
+        ):
+            raise HTTPException(
+                409,
+                "Question types, counts and MCQ options cannot change after results exist. Create a new assessment for a different sheet.",
+            )
         if not obj:
             obj = m.Examination(school_id=school_id, id=row["id"], key_version=1)
             db.add(obj)

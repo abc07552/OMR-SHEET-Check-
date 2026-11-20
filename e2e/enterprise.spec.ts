@@ -918,3 +918,353 @@ test("real password registration portal creates an isolated school and supports 
   });
   expect(errors).toEqual([]);
 });
+
+test("scanned mixed layouts, three-digit keys, real browser/native digit scans and explicit correction", async ({
+  page,
+}, info) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  const email = `integer-${randomUUID()}@school.edu`,
+    password = `integer-QA-${randomUUID()}`;
+  const setup = await api(page.request, "/setup/status");
+  let user;
+  if (setup.needsSetup)
+    user = (
+      await api(page.request, "/setup", "POST", {
+        email,
+        password,
+        name: "Integer QA",
+        school: { name: "Integer QA School", code: "INT" },
+      })
+    ).user;
+  else
+    user = (
+      await api(page.request, "/auth/signup", "POST", {
+        email,
+        password,
+        name: "Integer QA",
+        schoolName: "Integer QA School",
+      })
+    ).user;
+  const school = user.memberships[0].schoolId;
+  const state = () => api(page.request, `/schools/${school}/workspace`);
+  let body = await state();
+  body.workspace.students = [
+    {
+      id: "integer-learner",
+      schoolId: school,
+      name: "Numeric Learner",
+      roll: "10001",
+      section: "10 A",
+      registeredAt: "2026-11-17",
+    },
+    {
+      id: "partial-learner",
+      schoolId: school,
+      name: "Partial Numeric Learner",
+      roll: "10002",
+      section: "10 A",
+      registeredAt: "2026-11-17",
+    },
+  ];
+  await api(page.request, `/schools/${school}/workspace`, "PUT", {
+    ...body,
+    operationId: randomUUID(),
+  });
+  const layoutPath = info.outputPath("synthetic-mixed-layout.png"),
+    filledPath = info.outputPath("synthetic-integer-filled.png"),
+    partialPath = info.outputPath("synthetic-integer-partial.png");
+  execFileSync(
+    process.env.OMR_TEST_PYTHON || path.resolve(".venv/bin/python"),
+    [
+      "-c",
+      `
+import sys,cv2
+from pathlib import Path
+from backend.tests.integer_fixtures import mixed_exam,mixed_image
+from backend.tests.test_omr import png
+from backend.geometry import bubble_points
+Path(sys.argv[1]).write_bytes(png(mixed_image(marks=False,four_columns=True)))
+image=mixed_image()
+Path(sys.argv[2]).write_bytes(png(image))
+points,radius,_=bubble_points(20,mixed_exam())
+for x,y in points:
+    cv2.circle(image,(round(x),round(y)),round(radius)+3,(255,255,255),-1)
+    cv2.circle(image,(round(x),round(y)),round(radius),(45,45,45),2)
+for i in [0,10]:
+    x,y=points[i];cv2.circle(image,(round(x),round(y)),round(radius)-1,(12,12,12),-1)
+Path(sys.argv[3]).write_bytes(png(image))
+`,
+      layoutPath,
+      filledPath,
+      partialPath,
+    ],
+  );
+  await page.goto("/");
+  await saved(page);
+  await navigate(page, "keys");
+  await page
+    .getByRole("button", { name: "New answer key", exact: true })
+    .click();
+  let dialog = page.getByRole("dialog");
+  await dialog
+    .getByLabel("Assessment name", { exact: true })
+    .fill("Mixed integer paper");
+  await dialog.getByLabel("Subject", { exact: true }).fill("Mathematics");
+  await dialog.getByLabel("Number of questions", { exact: true }).fill("25");
+  await dialog
+    .getByRole("combobox", { name: "Answer options", exact: true })
+    .selectOption("4");
+  await dialog
+    .getByRole("button", { name: "Create answer key", exact: true })
+    .click();
+  await saved(page);
+  const examId = await page.getByLabel("Current assessment").inputValue();
+  await navigate(page, "templates");
+  await page
+    .getByRole("button", { name: "Scan a layout", exact: true })
+    .click();
+  dialog = page.getByRole("dialog", { name: "Scan a layout" });
+  await dialog
+    .getByLabel("Scan layout image", { exact: true })
+    .setInputFiles(layoutPath);
+  await expect(dialog.locator(".detected-region")).toHaveCount(26, {
+    timeout: 90_000,
+  });
+  const grids = dialog
+    .locator(".detected-region")
+    .filter({ hasText: "4 columns × 11 rows" });
+  await expect(grids).toHaveCount(5);
+  const roll = dialog
+    .locator(".detected-region")
+    .filter({ hasText: "5 columns × 10 rows" });
+  await expect(roll.getByRole("checkbox")).not.toBeChecked();
+  const use = dialog.getByRole("button", {
+    name: "Use reviewed layout",
+    exact: true,
+  });
+  await expect(use).toBeDisabled();
+  for (let i = 0; i < 5; i++) {
+    const grid = grids.nth(i);
+    await grid.getByRole("checkbox").check();
+    await grid.getByLabel(/digit columns/).selectOption("0");
+    await grid.getByLabel(/zero row/).selectOption("1");
+  }
+  await dialog
+    .getByRole("button", { name: "Renumber selected regions", exact: true })
+    .click();
+  await dialog.getByLabel(/I checked the numbering/).check();
+  await use.click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByLabel("Calibrate question region")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Download saved PDF", exact: true }),
+  ).toBeDisabled();
+  await page.getByRole("button", { name: "Save layout", exact: true }).click();
+  await saved(page);
+  body = await state();
+  let current = body.workspace.exams.find(
+    (e: { id: string }) => e.id === examId,
+  );
+  expect(current.questionTypes).toEqual([
+    ...Array(20).fill("choice"),
+    ...Array(5).fill("integer3"),
+  ]);
+  expect(current.answers).toEqual(Array(25).fill(null));
+  expect(current.layout.questionRegions).toHaveLength(25);
+  expect(current.layout.ocrEnabled).toBe(false);
+  await expect(
+    page.getByRole("button", { name: "Download saved PDF", exact: true }),
+  ).toBeEnabled();
+  await page.getByLabel("Calibrate question region").selectOption("20");
+  const origin = page.getByLabel("Question origin x", { exact: true });
+  const originalX = Number(await origin.inputValue());
+  await origin.fill(String(originalX + 1));
+  await expect(
+    page.getByRole("button", { name: "Download saved page PNG", exact: true }),
+  ).toBeDisabled();
+  await page.getByRole("button", { name: "Save layout", exact: true }).click();
+  await saved(page);
+  current = (await state()).workspace.exams.find(
+    (e: { id: string }) => e.id === examId,
+  );
+  expect(
+    current.layout.questionRegions.find(
+      (r: { question: number }) => r.question === 20,
+    ).points[0].x,
+  ).toBe(originalX + 1);
+  await page.screenshot({
+    path: info.outputPath("mixed-layout-studio.png"),
+    fullPage: true,
+  });
+  await navigate(page, "keys");
+  for (let q = 21; q <= 25; q++)
+    await expect(
+      page.getByLabel(`Question ${q}, three-digit integer answer`, {
+        exact: true,
+      }),
+    ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Paste answers", exact: true })
+    .click();
+  dialog = page.getByRole("dialog");
+  const answers = Array.from({ length: 20 }, (_, q) => "ABCD"[q % 4]).concat([
+    "007",
+    "042",
+    "999",
+    "000",
+    "105",
+  ]);
+  await dialog.getByLabel("Your correct answers").fill(answers.join(" "));
+  await dialog
+    .getByRole("button", { name: "Apply answers", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Save answer key", exact: true })
+    .click();
+  await saved(page);
+  const downloadPromise = page.waitForEvent("download");
+  await page
+    .getByRole("button", { name: "Download OMR template", exact: true })
+    .click();
+  const download = await downloadPromise;
+  expect(
+    (await readFile((await download.path())!)).subarray(0, 5).toString(),
+  ).toBe("%PDF-");
+  const native = await page.request.post(
+    `/api/schools/${school}/exams/${examId}/scan`,
+    {
+      headers: header,
+      multipart: {
+        pageIndex: "0",
+        ocr: "false",
+        operationId: randomUUID(),
+        file: {
+          name: "filled.png",
+          mimeType: "image/png",
+          buffer: await readFile(filledPath),
+        },
+      },
+    },
+  );
+  expect(native.ok(), await native.text()).toBe(true);
+  expect((await native.json()).answers).toEqual(answers);
+  await navigate(page, "scanner");
+  await page
+    .getByLabel("Upload OMR sheets or PDF", { exact: true })
+    .setInputFiles({
+      name: "Numeric Learner_10001.png",
+      mimeType: "image/png",
+      buffer: await readFile(filledPath),
+    });
+  await page.getByRole("button", { name: "Scan 1 page", exact: true }).click();
+  await expect(page.locator(".scan-queue-item.done")).toHaveCount(1, {
+    timeout: 90_000,
+  });
+  await saved(page);
+  let result = (await state()).workspace.results.find(
+    (r: { studentId: string }) => r.studentId === "integer-learner",
+  );
+  expect(result.answers).toEqual(answers);
+  expect(result.flagged).toEqual([]);
+  expect(result.engine).toBe("opencv");
+  expect(result.answerMeta[20].coordinates).toHaveLength(30);
+  expect(result.detectedOptions[20]).toEqual(["007"]);
+  await page
+    .getByLabel("Upload OMR sheets or PDF", { exact: true })
+    .setInputFiles({
+      name: "Partial Numeric Learner_10002.png",
+      mimeType: "image/png",
+      buffer: await readFile(partialPath),
+    });
+  await page.getByRole("button", { name: "Scan 1 page", exact: true }).click();
+  await expect(page.locator(".scan-queue-item.done")).toHaveCount(2, {
+    timeout: 90_000,
+  });
+  await saved(page);
+  result = (await state()).workspace.results.find(
+    (r: { studentId: string }) => r.studentId === "partial-learner",
+  );
+  expect(result.answers[20]).toBeNull();
+  expect(result.flagged).toContain(20);
+  expect(result.detectedOptions[20]).toEqual([]);
+  await page
+    .getByRole("button", {
+      name: "Review Partial Numeric Learner",
+      exact: true,
+    })
+    .click();
+  dialog = page.getByRole("dialog");
+  await dialog
+    .getByLabel("Question 21 integer response", { exact: true })
+    .fill("7");
+  await dialog
+    .getByRole("button", { name: "Confirm integer 007", exact: true })
+    .click();
+  await dialog
+    .getByRole("button", { name: "Save responses", exact: true })
+    .click();
+  await expect(dialog).toHaveCount(0);
+  await saved(page);
+  result = (await state()).workspace.results.find(
+    (r: { studentId: string }) => r.studentId === "partial-learner",
+  );
+  expect(result.answers[20]).toBe("007");
+  expect(result.answerMeta[20].status).toBe("manual");
+  expect(result.answerMeta[20].verified).toBe(true);
+  expect(result.answerMeta[20].coordinates).toHaveLength(30);
+  expect(result.flagged).toEqual([]);
+  const history = await api(
+    page.request,
+    `/schools/${school}/results/${result.id}/history`,
+  );
+  expect(history.evaluations[0].outcome.score).toBe(50);
+  expect(history.evaluations[0].outcome.needsReview).toBe(false);
+  await navigate(page, "keys");
+  await expect(
+    page.getByLabel("Question 21 answer type", { exact: true }),
+  ).toBeDisabled();
+  await navigate(page, "analytics");
+  await page
+    .getByLabel("Question to inspect", { exact: true })
+    .selectOption("21");
+  await expect(
+    page.locator(".answer-breakdown-bars .breakdown-option"),
+  ).toHaveText(["007"]);
+  const csvPromise = page.waitForEvent("download");
+  await page
+    .getByRole("button", { name: "Export analysis", exact: true })
+    .click();
+  const csvRows = (await readFile((await (await csvPromise).path())!, "utf8"))
+    .split("\r\n")
+    .map((r) => r.split(","));
+  expect(csvRows.every((r) => r.length === csvRows[0].length)).toBe(true);
+  expect(csvRows[21].at(-1)).toBe("007: 2");
+  for (const width of [1440, 768, 390]) {
+    await page.setViewportSize({ width, height: 960 });
+    for (const route of ["keys", "templates"]) {
+      await navigate(page, route);
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth + 1,
+        ),
+        `${route} at ${width}`,
+      ).toBe(true);
+    }
+  }
+  await page
+    .getByRole("button", { name: "Scan a layout", exact: true })
+    .click();
+  dialog = page.getByRole("dialog");
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth + 1,
+    ),
+  ).toBe(true);
+  await page.screenshot({
+    path: info.outputPath("layout-scan-mobile.png"),
+    fullPage: true,
+  });
+  await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+  expect(errors).toEqual([]);
+});

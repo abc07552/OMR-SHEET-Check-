@@ -1,5 +1,7 @@
 import type { Exam, MarkingRules, Option, Result } from "./data";
 import Decimal from "decimal.js";
+import { validSelection } from "./answers";
+import { getLayout } from "./layout";
 export const ScoringDecimal = Decimal.clone({
   precision: 28,
   rounding: Decimal.ROUND_HALF_EVEN,
@@ -32,7 +34,8 @@ export function scoreLocally(result: Result, exam: Exam) {
     partial = 0;
   let positive = new ScoringDecimal(0),
     negative = new ScoringDecimal(0),
-    multipleReview = false;
+    multipleReview = false,
+    invalidResponse = false;
   const questions = (key || Array(exam.questions).fill(null)).map(
     (expected: Option[] | null, i: number) => {
       const chosen =
@@ -40,7 +43,10 @@ export function scoreLocally(result: Result, exam: Exam) {
         (result.answers[i] ? [result.answers[i]!] : []);
       let marks = 0,
         status = "unkeyed";
-      if (expected?.length) {
+      if (!validSelection(exam, i, chosen)) {
+        invalidResponse = true;
+        status = "invalid";
+      } else if (expected?.length) {
         const exact =
           chosen.length === expected.length &&
           chosen.every((o) => expected.includes(o));
@@ -105,10 +111,7 @@ export function scoreLocally(result: Result, exam: Exam) {
     negativeMarks = negative.toNumber();
   const expectedPages =
     result.pageTotal ||
-    Math.ceil(
-      exam.questions /
-        (exam.layout?.questionsPerPage || Math.min(100, exam.questions)),
-    );
+    Math.ceil(exam.questions / getLayout(exam).questionsPerPage);
   const missingPages =
     expectedPages > 1 &&
     new Set(result.pageIndices || []).size < expectedPages &&
@@ -121,6 +124,7 @@ export function scoreLocally(result: Result, exam: Exam) {
   );
   const needsReview =
     !exam.published ||
+    invalidResponse ||
     !key ||
     !!result.identityReview ||
     missingPages ||

@@ -503,6 +503,28 @@ export function createApp({
         );
       const previous = JSON.parse(row.payload);
       if (
+        workspace.exams.some((exam) => {
+          const old = previous.exams.find((e) => e.id === exam.id);
+          return (
+            old &&
+            previous.results.some((r) => r.examId === exam.id) &&
+            (old.questions !== exam.questions ||
+              (old.optionCount || 4) !== (exam.optionCount || 4) ||
+              Array.from(
+                { length: exam.questions },
+                (_, q) =>
+                  (old.questionTypes?.[q] || "choice") !==
+                  (exam.questionTypes?.[q] || "choice"),
+              ).some(Boolean))
+          );
+        })
+      )
+        return fail(
+          res,
+          409,
+          "Question types, counts and MCQ options are locked after results exist. Create a new assessment for a different sheet.",
+        );
+      if (
         req.role !== "admin" &&
         (workspace.school !== previous.school ||
           workspace.schools.some((s) => {

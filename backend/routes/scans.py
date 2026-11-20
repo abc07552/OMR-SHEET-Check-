@@ -10,8 +10,9 @@ from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session
 
 from .. import models as m
+from ..geometry import default_layout
 from ..object_store import MAX_UPLOAD, verified_image
-from ..omr import ScanError, scan_image
+from ..omr import ScanError, scan_image, signature
 from ..security import allowed_exam, allowed_student, audit, current_user, db_session, fingerprint, membership
 from .auth import throttle
 
@@ -58,7 +59,17 @@ def scan(
     data = file.file.read(MAX_UPLOAD + 1)
     media, sha = verified_image(data)
     request_hash = fingerprint(
-        {"sha": sha, "exam": exam_id, "page": pageIndex, "ocr": ocr, "version": exam.key_version}
+        {
+            "sha": sha,
+            "exam": exam_id,
+            "page": pageIndex,
+            "ocr": ocr,
+            "version": exam.key_version,
+            "layout": signature(exam.payload),
+            "readSettings": {
+                k: (exam.payload.get("layout") or {}).get(k) for k in ("threshold", "ocrEnabled", "rollRegion")
+            },
+        }
     )
     previous = db.get(m.Operation, (school_id, operationId))
     if previous:
@@ -475,7 +486,7 @@ def apply_page(
     workspace = load_workspace(db, school_id)
     record = next((r for r in workspace["results"] if r["examId"] == exam.id and r["studentId"] == student.id), None)
     page = read["pageIndex"]
-    per = exam.payload.get("layout", {}).get("questionsPerPage", min(100, exam.questions))
+    per = (exam.payload.get("layout") or default_layout(exam.payload))["questionsPerPage"]
     if record:
         if record.get("questionSet", "A") != read.get("questionSet", "A"):
             raise HTTPException(

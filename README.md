@@ -75,12 +75,28 @@ See the [complete configuration, usage and verification guide](documentation/GOO
 Live Google/SMTP authorization and real Android callback acceptance still need
 your configured project, domain and authorized test users.
 
+## Three-digit answers and layout scanning
+
+**Answer keys** now supports **3-digit integer · 000–999**, including mixed MCQ
+and integer papers. Values retain leading zeroes (`7` → `007`). Numeric scans
+measure three independent digit columns; incomplete or ambiguous marks still
+require explicit manual verification.
+
+Use **Layout studio → Scan a layout → Choose layout image / Use camera** to
+measure an existing OMR form. Review grid types, numbering, the intended three
+digit columns and the ten 0–9 rows; exclude roll-number grids, accept the editable
+draft, calibrate and **Save layout** before downloading. This imports one image /
+up to 100 mapped questions; standard multipage templates retain the 500-question
+limit. The saved reference photo is private school-workspace data, never printed
+or converted to a key. Prefer a blank sheet or remove its reference after
+calibration. Read the [usage, mapping limits and verification guide](documentation/INTEGER_LAYOUT_SCANNING.md).
+
 ## Working capabilities
 
 - Navy/electric-blue responsive interface, light/dark/system themes, role-aware navigation, command search, filters and real-record dashboard metrics.
 - Super-administrator institutions; administrator account management; assigned-class and feature-restricted teachers; private, explicitly published student results/progress/report cards.
 - Camera/gallery/drop/multi-image/PDF scanning; browser OpenCV.js or native Python OpenCV; calibrated templates, perspective/orientation handling, QR/barcode and numeric roll OCR. Detection never uses the answer key to infer marks.
-- Up to **500 questions**, **2–5 options including A–E**, multipage layouts, draggable fields, logos, geometry calibration, PDF/print templates and retained template versions.
+- Up to **500 questions**, **2–5 options including A–E** and mixed **000–999 integer responses**, multipage layouts, draggable fields, logos, geometry calibration, PDF/print templates and retained template versions.
 - Durable server scan jobs with categorized failures/retry, explicit identity matching, revision-checked page application and operation receipts. Original pixels are retained encrypted; evidence includes measured coordinates, per-answer status/confidence and manual-verification history.
 - Student CRUD and column-mapped CSV/XLSX imports: inspection → validation/duplicate preview → invalid-row report → explicit confirmation → transactional import. No automatic import just from uploading a file.
 - Decimal-based scoring, alternate/multiple-answer sets, negative/partial/blank policies, versioned keys, authorized re-evaluation and historical evaluations. Unverified uncertain marks, flagged identities and missing pages do not silently become final results.
@@ -135,6 +151,7 @@ The verified Node baseline is commit `8b5360f`; the enterprise API checkpoint is
 
 - `src/session.tsx`, `src/offline.ts`: authentication, encrypted offline authorization, stable operation queues and revision conflicts.
 - `src/Scanner.tsx`, `src/scanEngine.ts`, `src/omr.ts`, `src/geometry.ts`: real browser scans, camera/PDF input and printable geometry.
+- `src/LayoutScanner.tsx`, `src/layoutImport.ts`, `src/layoutVision.ts`, `src/layout.ts`, `src/answers.ts`, `backend/geometry.py`: reviewed image-to-layout mapping, editable mixed MCQ/integer geometry, contextual validation and compatible print/scan signatures.
 - `src/BatchCenter.tsx`, `src/ScanEvidence.tsx`, `src/Students.tsx`: native job application, originals/overlays and atomic human corrections.
 - `src/StudentImport.tsx`, `src/StudentPortal.tsx`, `src/EvaluationCenter.tsx`, `src/SystemCenter.tsx`, `src/InstitutionDefaults.tsx`: imports, private results, scoring policy, revision-protected preferences and operations.
 - `backend/`: relational API, schemas/migrations, authorization, deterministic scoring, genuine native OMR, encrypted storage and reports.

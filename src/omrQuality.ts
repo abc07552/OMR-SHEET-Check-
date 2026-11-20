@@ -1,19 +1,19 @@
 import type { Exam } from "./data";
-import { getLayout, HEIGHT, WIDTH } from "./layout";
-import { questionPosition } from "./omr";
+import { getLayout, HEIGHT, WIDTH, pageQuestionCount } from "./layout";
+import { questionBubbles } from "./omr";
 
 /** Printed-outline contrast only. QR contents and answer keys never raise it. */
-export function outlineReadability(data: ImageData, exam: Exam): number {
+export function outlineReadability(
+  data: ImageData,
+  exam: Exam,
+  page = 0,
+): number {
   if (data.width !== WIDTH || data.height !== HEIGHT) return 0;
   const layout = getLayout(exam),
     values: number[] = [];
-  for (
-    let q = 0;
-    q < Math.min(24, exam.questions, layout.questionsPerPage);
-    q++
-  ) {
-    const p = questionPosition(q, exam);
-    for (const x of p.xs) {
+  for (let q = 0; q < Math.min(24, pageQuestionCount(exam, page)); q++) {
+    const p = questionBubbles(q, exam, page);
+    for (const { x, y: centerY } of p.points) {
       let ring = 0,
         outside = 0,
         nr = 0,
@@ -26,7 +26,7 @@ export function outlineReadability(data: ImageData, exam: Exam): number {
                 ? Math.max(Math.abs(dx), Math.abs(y))
                 : Math.hypot(dx, y),
             px = Math.round(x + dx),
-            py = Math.round(p.y + y);
+            py = Math.round(centerY + y);
           if (px < 0 || py < 0 || px >= WIDTH || py >= HEIGHT) continue;
           const i = (py * WIDTH + px) * 4,
             brightness =

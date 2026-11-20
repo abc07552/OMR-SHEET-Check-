@@ -8,6 +8,7 @@ from bisect import bisect_left
 from collections import Counter
 from decimal import Decimal
 
+from .geometry import default_layout, question_type, valid_selection
 from .schemas import Exam, Result
 from .security import fingerprint
 
@@ -35,12 +36,17 @@ def evaluate(result: dict, exam: dict):
     maximum = number(e["marksCorrect"]) * sum(bool(k) for k in key)
     outcomes = []
     multi_review = False
+    invalid_response = False
     for i, expected in enumerate(key):
         chosen = r["detectedOptions"][i] if r.get("detectedOptions") else ([r["answers"][i]] if r["answers"][i] else [])
+        invalid = not valid_selection(e, i, chosen)
         chosen, expected = set(chosen), set(expected or [])
         points = Decimal(0)
         state = "unkeyed"
-        if expected:
+        if invalid:
+            invalid_response = True
+            state = "invalid"
+        elif expected:
             if not chosen:
                 blank += 1
                 state, points = "blank", number(rules["unansweredMarks"])
@@ -82,7 +88,7 @@ def evaluate(result: dict, exam: dict):
         score = max(Decimal(0), score)
     percentage = score / maximum * 100 if maximum else Decimal(0)
     expected_pages = r.get("pageTotal") or math.ceil(
-        e["questions"] / (e.get("layout", {}).get("questionsPerPage") or min(100, e["questions"]))
+        e["questions"] / (e.get("layout") or default_layout(e))["questionsPerPage"]
     )
     missing = (
         expected_pages > 1
@@ -94,7 +100,8 @@ def evaluate(result: dict, exam: dict):
         for a in r.get("answerMeta", [])
     )
     review = bool(
-        not e["published"]
+        invalid_response
+        or not e["published"]
         or unknown_set
         or r.get("identityReview")
         or missing
@@ -181,6 +188,15 @@ def analytics(results, exam):
         answers = [g["questions"][i] for _, g in valid]
         n_correct = sum(q["status"] == "correct" for q in answers)
         choices = Counter(a for q in answers for a in q["selected"])
+        available = (
+            sorted(
+                set(choices)
+                | {a for q in answers for a in q["expected"]}
+                | ({exam["answers"][i]} if exam["answers"][i] else set())
+            )
+            if question_type(exam, i) == "integer3"
+            else "ABCDE"[: exam.get("optionCount", 4)]
+        )
         question_data.append(
             {
                 "question": i + 1,
@@ -188,7 +204,7 @@ def analytics(results, exam):
                 "total": len(valid),
                 "difficulty": n_correct / len(valid) * 100 if valid else 0,
                 "blank": sum(q["status"] == "blank" for q in answers),
-                "options": {a: choices[a] for a in "ABCDE"[: exam.get("optionCount", 4)]},
+                "options": {a: choices[a] for a in available},
             }
         )
     distribution = [

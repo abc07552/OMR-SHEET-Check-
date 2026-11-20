@@ -1,3 +1,4 @@
+import { outerMarkerQuad } from "./layoutVision";
 import cvURL from "@techstark/opencv-js/dist/opencv.js?url";
 import jsQR from "jsqr";
 import type { AnswerDetection, Exam, Option } from "./data";
@@ -157,7 +158,11 @@ export async function cameraRegistration(
   const { cv } = await loadOpenCV();
   const src = cv.imread(canvas);
   try {
-    return cvMarkers(cv, src, exam.layout?.anchors || MARKERS).map((p) => ({
+    return (
+      exam.layout?.anchorMode === "fiducials"
+        ? outerMarkerQuad(cv, src)
+        : cvMarkers(cv, src, exam.layout?.anchors || MARKERS)
+    ).map((p) => ({
       x: p.x / src.cols,
       y: p.y / src.rows,
     }));
@@ -167,7 +172,7 @@ export async function cameraRegistration(
     src.delete();
   }
 }
-function pageQuad(cv: CV, src: CV): Point[] {
+export function pageQuad(cv: CV, src: CV, requireBoundary = false): Point[] {
   const gray = new cv.Mat(),
     blur = new cv.Mat(),
     edges = new cv.Mat(),
@@ -204,6 +209,10 @@ function pageQuad(cv: CV, src: CV): Point[] {
         approx.delete();
       }
     }
+    if (!best && requireBoundary)
+      throw new Error(
+        "The full paper boundary is not visible. Place the sheet on a contrasting background, with all corners in view.",
+      );
     return best
       ? orderQuad(best)
       : [
@@ -237,8 +246,10 @@ function alignOne(cv: CV, canvas: HTMLCanvasElement, exam: Exam) {
         : exam.layout?.anchors || MARKERS;
     source =
       layout.anchorMode === "page"
-        ? pageQuad(cv, src)
-        : cvMarkers(cv, src, reference);
+        ? pageQuad(cv, src, true)
+        : layout.anchorMode === "fiducials"
+          ? outerMarkerQuad(cv, src)
+          : cvMarkers(cv, src, reference);
     const from = cv.matFromArray(
         4,
         1,
@@ -285,12 +296,16 @@ function alignOne(cv: CV, canvas: HTMLCanvasElement, exam: Exam) {
     dest.delete();
   }
 }
-function registrationQuality(canvas: HTMLCanvasElement, exam: Exam) {
+function registrationQuality(
+  canvas: HTMLCanvasElement,
+  exam: Exam,
+  page: number,
+) {
   const data = canvas
     .getContext("2d", { willReadFrequently: true })!
     .getImageData(0, 0, WIDTH, HEIGHT);
-  const readability = outlineReadability(data, exam);
-  let score = readability;
+  let qrPage = page,
+    orientationHint = 0;
   // QR placement disambiguates symmetric 180-degree registration without reading the key.
   const qr = jsQR(data.data, WIDTH, HEIGHT, {
     inversionAttempts: "dontInvert",
@@ -299,6 +314,8 @@ function registrationQuality(canvas: HTMLCanvasElement, exam: Exam) {
     try {
       const meta = JSON.parse(qr.data);
       if (meta.m === 2) {
+        if (Number.isInteger(meta.p) && meta.p >= 0 && meta.p < pageCount(exam))
+          qrPage = meta.p;
         const f = getLayout(exam).fields.find(
             (v) => v.visible && v.type === "qr",
           ),
@@ -311,7 +328,7 @@ function registrationQuality(canvas: HTMLCanvasElement, exam: Exam) {
           y:
             (qr.location.topLeftCorner.y + qr.location.bottomRightCorner.y) / 2,
         };
-        score +=
+        orientationHint =
           180 *
           Math.max(
             0,
@@ -322,9 +339,10 @@ function registrationQuality(canvas: HTMLCanvasElement, exam: Exam) {
       /* Arbitrary barcodes do not provide a Markly orientation hint. */
     }
   }
-  return { score, readability };
+  const readability = outlineReadability(data, exam, qrPage);
+  return { score: readability + orientationHint, readability };
 }
-function align(cv: CV, canvas: HTMLCanvasElement, exam: Exam) {
+function align(cv: CV, canvas: HTMLCanvasElement, exam: Exam, page: number) {
   const candidates =
     canvas.width / canvas.height > 1.2
       ? [1, 3]
@@ -350,7 +368,7 @@ function align(cv: CV, canvas: HTMLCanvasElement, exam: Exam) {
     ctx.drawImage(canvas, -canvas.width / 2, -canvas.height / 2);
     try {
       const registered = alignOne(cv, rotated, exam),
-        quality = registrationQuality(registered.canvas, exam);
+        quality = registrationQuality(registered.canvas, exam, page);
       const matrix = multiply3(
         registered.matrix,
         rotation3(k, canvas.width + 1, canvas.height + 1),
@@ -497,15 +515,20 @@ export async function scanPageFile(
   if (engine === "opencv") {
     settings.onStage?.("Aligning sheet with OpenCV…");
     const { cv } = await loadOpenCV();
-    const registered = align(cv, canvas, exam);
+    const registered = align(cv, canvas, exam, settings.pageIndex ?? 0);
     aligned = registered.canvas;
     sourceToAligned = multiply3(registered.matrix, [
       [scale, 0, 0],
       [0, scale, 0],
       [0, 0, 1],
     ]);
-  } else if (exam.layout?.anchorMode === "page")
-    throw new Error("Paper-edge calibration requires the OpenCV engine.");
+  } else if (
+    exam.layout?.anchorMode === "page" ||
+    exam.layout?.anchorMode === "fiducials"
+  )
+    throw new Error(
+      "Imported/page-edge calibration requires the OpenCV engine.",
+    );
   const ctx = aligned.getContext("2d", { willReadFrequently: true })!,
     image = ctx.getImageData(0, 0, aligned.width, aligned.height);
   let pageIndex = settings.pageIndex || 0,
@@ -554,7 +577,11 @@ export async function scanPageFile(
       } else throw e;
     }
   }
-  if (pageIndex >= pageCount(exam))
+  if (
+    !Number.isInteger(pageIndex) ||
+    pageIndex < 0 ||
+    pageIndex >= pageCount(exam)
+  )
     throw new Error("Choose a valid page number for this assessment.");
   settings.onStage?.("Reading bubble marks…");
   let result: {
@@ -567,7 +594,7 @@ export async function scanPageFile(
   if (engine === "opencv")
     result = analyzeAlignedImageData(image, exam, pageIndex);
   else result = analyzeImageEvidence(image, exam, pageIndex);
-  if (settings.ocr && !roll) {
+  if (settings.ocr && !roll && getLayout(exam).ocrEnabled !== false) {
     try {
       const found = await readRollNumber(aligned, exam, settings.onStage);
       roll = found.roll;

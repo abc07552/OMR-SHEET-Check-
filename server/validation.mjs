@@ -1,7 +1,24 @@
 import { z } from "zod";
 const id = z.string().min(1).max(120),
   label = z.string().trim().min(1).max(120),
-  option = z.enum(["A", "B", "C", "D", "E"]).nullable();
+  option = z
+    .string()
+    .regex(/^(?:[A-E]|[0-9]{3})$/)
+    .nullable();
+const questionType = (e, q) => e.questionTypes?.[q] || "choice";
+const validAnswer = (e, q, a) =>
+  a === null ||
+  (questionType(e, q) === "integer3"
+    ? /^[0-9]{3}$/.test(a)
+    : "ABCDE"
+        .slice(0, e.optionCount || 4)
+        .split("")
+        .includes(a));
+const validSelection = (e, q, a) =>
+  Array.isArray(a) &&
+  new Set(a).size === a.length &&
+  a.length <= (questionType(e, q) === "integer3" ? 1 : e.optionCount || 4) &&
+  a.every((v) => v !== null && validAnswer(e, q, v));
 const raster = (maxLength) =>
   z
     .string()
@@ -38,10 +55,21 @@ const layout = z.object({
   labelOffset: z.number().min(0).max(500),
   bubbleShape: z.enum(["circle", "square"]),
   threshold: z.number().min(0.15).max(0.95),
-  anchorMode: z.enum(["markers", "page"]),
+  anchorMode: z.enum(["markers", "page", "fiducials"]),
+  questionRegions: z
+    .array(
+      z.object({
+        question: z.number().int().min(0).max(499),
+        radius: z.number().min(5).max(25),
+        points: z.array(point).min(2).max(30),
+      }),
+    )
+    .max(500)
+    .optional(),
   anchors: z.array(point).length(4),
   fields: z.array(field).max(40),
   referenceImage: raster(2000000).optional(),
+  ocrEnabled: z.boolean().optional(),
   rollRegion: z.object({
     x: z.number().min(0).max(1240),
     y: z.number().min(0).max(1754),
@@ -76,7 +104,26 @@ const student = z.object({
 const exam = z.object({
   id,
   schoolId: id,
-  optionCount: z.union([z.literal(4), z.literal(5)]).optional(),
+  optionCount: z
+    .union([z.literal(2), z.literal(3), z.literal(4), z.literal(5)])
+    .optional(),
+  questionTypes: z
+    .array(z.enum(["choice", "integer3"]))
+    .min(1)
+    .max(500)
+    .optional(),
+  questionSets: z
+    .array(
+      z.object({
+        code: z.string().min(1).max(20),
+        answers: z
+          .array(z.array(option.unwrap()).min(1).max(5).nullable())
+          .min(1)
+          .max(500),
+      }),
+    )
+    .max(26)
+    .optional(),
   subjects: z
     .array(
       z.object({
@@ -120,7 +167,45 @@ const result = z.object({
     .optional(),
   identityReview: z.boolean().optional(),
   missingPagesAccepted: z.boolean().optional(),
-  engine: z.enum(["opencv", "canvas"]).optional(),
+  engine: z.enum(["opencv", "canvas", "opencv-python"]).optional(),
+  questionSet: z.string().min(1).max(20).optional(),
+  detectedOptions: z.array(z.array(option.unwrap()).max(5)).max(500).optional(),
+  answerMeta: z
+    .array(
+      z.object({
+        question: z.number().int().min(0).max(499),
+        selected: z.array(option.unwrap()).max(5),
+        status: z.enum([
+          "blank",
+          "filled",
+          "partial",
+          "erased",
+          "multiple",
+          "uncertain",
+          "invalid",
+          "manual",
+        ]),
+        confidence: z.number().min(0).max(100).optional(),
+        verified: z.boolean(),
+        coordinates: z
+          .array(
+            z.object({
+              option: option.unwrap().optional(),
+              digitColumn: z.number().int().min(0).max(2).optional(),
+              digit: z.number().int().min(0).max(9).optional(),
+              x: z.number().optional(),
+              y: z.number().optional(),
+              alignedX: z.number().optional(),
+              alignedY: z.number().optional(),
+              radius: z.number().min(0).max(1000).optional(),
+              inkRatio: z.number().min(0).max(1).optional(),
+            }),
+          )
+          .max(30),
+      }),
+    )
+    .max(500)
+    .optional(),
   scanConfidence: z.number().min(0).max(100).optional(),
 });
 export const workspaceSchema = z
@@ -167,7 +252,8 @@ export const workspaceSchema = z
         issue("Use a valid assessment date.");
       if (
         e.answers.length !== e.questions ||
-        ((!e.optionCount || e.optionCount === 4) && e.answers.includes("E")) ||
+        (e.questionTypes && e.questionTypes.length !== e.questions) ||
+        e.answers.some((a, q) => !validAnswer(e, q, a)) ||
         (e.published && e.answers.some((a) => a === null))
       )
         issue("Question counts or answer options do not match.");
@@ -179,6 +265,14 @@ export const workspaceSchema = z
         issue("Subject question ranges are invalid.");
         continue; // Do not allocate a range from untrusted, out-of-bounds numbers.
       }
+      if (
+        e.questionSets?.some(
+          (set) =>
+            set.answers.length !== e.questions ||
+            set.answers.some((a, q) => a !== null && !validSelection(e, q, a)),
+        )
+      )
+        issue("Invalid question-set answers.");
       if (e.layout) {
         const l = e.layout;
         if (
@@ -192,18 +286,19 @@ export const workspaceSchema = z
         if (new Set(l.fields.map((f) => f.id)).size !== l.fields.length)
           issue("Every layout field needs a unique identifier.");
         if (
-          l.optionGap < l.radius * 2 + 2 ||
-          l.rowGap < l.radius * 2 + 2 ||
-          (l.columns > 1 &&
-            l.columnGap <
-              ((e.optionCount || 4) - 1) * l.optionGap +
-                l.radius * 2 +
-                l.labelOffset +
-                10)
+          !l.questionRegions?.length &&
+          (l.optionGap < l.radius * 2 + 2 ||
+            l.rowGap < l.radius * 2 + 2 ||
+            (l.columns > 1 &&
+              l.columnGap <
+                ((e.optionCount || 4) - 1) * l.optionGap +
+                  l.radius * 2 +
+                  l.labelOffset +
+                  10))
         )
           issue("Layout bubbles must not overlap.");
         if (
-          l.anchorMode === "markers" &&
+          ["markers", "fiducials"].includes(l.anchorMode) &&
           l.anchors.some(
             (p, i) =>
               p.x < 17 ||
@@ -217,19 +312,60 @@ export const workspaceSchema = z
           issue(
             "Registration squares must be ordered in the four outer corner regions.",
           );
-        const rows = Math.ceil(l.questionsPerPage / l.columns);
-        for (let q = 0; q < Math.min(l.questionsPerPage, e.questions); q++) {
-          const x = l.startX + Math.floor(q / rows) * l.columnGap,
-            y = l.startY + (q % rows) * l.rowGap;
-          if (
-            x - l.labelOffset < 25 ||
-            x - l.radius < 25 ||
-            x + ((e.optionCount || 4) - 1) * l.optionGap + l.radius > 1215 ||
-            y - l.radius < 25 ||
-            y + l.radius > 1684
-          ) {
-            issue("The bubble grid extends beyond the printable area.");
-            break;
+        if (
+          l.questionRegions &&
+          (new Set(l.questionRegions.map((r) => r.question)).size !==
+            l.questionRegions.length ||
+            l.questionRegions.some((r) => r.question >= e.questions))
+        )
+          issue("Invalid question-region mapping.");
+        const rows = Math.ceil(l.questionsPerPage / l.columns),
+          spatial = new Map();
+        for (let q = 0; q < e.questions; q++) {
+          const page = Math.floor(q / l.questionsPerPage),
+            local = q % l.questionsPerPage,
+            numeric = questionType(e, q) === "integer3",
+            region = l.questionRegions?.find((r) => r.question === q),
+            radius = region?.radius || l.radius;
+          const x = l.startX + Math.floor(local / rows) * l.columnGap,
+            y = l.startY + (local % rows) * l.rowGap;
+          const points =
+            region?.points ||
+            Array.from(
+              { length: numeric ? 30 : e.optionCount || 4 },
+              (_, i) => ({
+                x: x + (numeric ? Math.floor(i / 10) : i) * l.optionGap,
+                y: y + (numeric ? i % 10 : 0) * 30,
+              }),
+            );
+          if (points.length !== (numeric ? 30 : e.optionCount || 4))
+            issue("Wrong number of question bubbles.");
+          for (const p of points) {
+            if (
+              p.x - radius < 25 ||
+              p.x + radius > 1215 ||
+              p.y - radius < 25 ||
+              p.y + radius > 1684
+            )
+              issue("The bubble grid extends beyond the printable area.");
+            const cx = Math.floor(p.x / 52),
+              cy = Math.floor(p.y / 52);
+            for (let dx = -1; dx <= 1; dx++)
+              for (let dy = -1; dy <= 1; dy++)
+                if (
+                  (spatial.get(`${page}:${cx + dx}:${cy + dy}`) || []).some(
+                    (a) =>
+                      (l.bubbleShape === "square"
+                        ? Math.max(Math.abs(a.x - p.x), Math.abs(a.y - p.y))
+                        : Math.hypot(a.x - p.x, a.y - p.y)) <
+                      a.radius + radius + 2,
+                  )
+                ) {
+                  issue("Layout bubbles must not overlap.");
+                  return;
+                }
+            const key = `${page}:${cx}:${cy}`;
+            spatial.set(key, [...(spatial.get(key) || []), { ...p, radius }]);
           }
         }
       }
@@ -247,7 +383,25 @@ export const workspaceSchema = z
         !e ||
         r.answers.length !== e.questions ||
         r.flagged.some((q) => q >= e.questions) ||
-        ((e.optionCount || 4) === 4 && r.answers.includes("E")) ||
+        r.answers.some((a, q) => !validAnswer(e, q, a)) ||
+        (r.detectedOptions &&
+          (r.detectedOptions.length !== e.questions ||
+            r.detectedOptions.some(
+              (a, q) =>
+                !validSelection(e, q, a) ||
+                r.answers[q] !== (a.length === 1 ? a[0] : null),
+            ))) ||
+        (r.answerMeta &&
+          (new Set(r.answerMeta.map((m) => m.question)).size !==
+            r.answerMeta.length ||
+            r.answerMeta.some(
+              (m) =>
+                m.question >= e.questions ||
+                !validSelection(e, m.question, m.selected) ||
+                (r.detectedOptions &&
+                  JSON.stringify(m.selected) !==
+                    JSON.stringify(r.detectedOptions[m.question])),
+            ))) ||
         (r.pageIndices &&
           (new Set(r.pageIndices).size !== r.pageIndices.length ||
             r.pageIndices.some(
@@ -257,7 +411,10 @@ export const workspaceSchema = z
                   Math.ceil(
                     e.questions /
                       (e.layout?.questionsPerPage ||
-                        Math.min(100, e.questions)),
+                        Math.min(
+                          e.questionTypes?.includes("integer3") ? 12 : 100,
+                          e.questions,
+                        )),
                   )),
             )))
       )

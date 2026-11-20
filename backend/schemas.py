@@ -7,9 +7,11 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
 
+from .geometry import default_layout, valid_answer, valid_selection, validate_geometry
+
 Identifier = Annotated[str, Field(min_length=1, max_length=120)]
 Label = Annotated[str, Field(min_length=1, max_length=120)]
-Option = Literal["A", "B", "C", "D", "E"]
+Option = Annotated[str, Field(pattern=r"^(?:[A-E]|[0-9]{3})$")]
 
 
 class Document(BaseModel):
@@ -60,6 +62,12 @@ class SheetField(Region):
         return self
 
 
+class QuestionRegion(Document):
+    question: int = Field(ge=0, le=499)
+    radius: float = Field(ge=5, le=25)
+    points: list[Point] = Field(min_length=2, max_length=30)
+
+
 class Layout(Document):
     version: Literal[2]
     name: Label
@@ -74,10 +82,12 @@ class Layout(Document):
     labelOffset: float = Field(ge=0, le=500)
     bubbleShape: Literal["circle", "square"]
     threshold: float = Field(ge=0.15, le=0.95)
-    anchorMode: Literal["markers", "page"]
+    anchorMode: Literal["markers", "page", "fiducials"]
+    questionRegions: list[QuestionRegion] | None = Field(default=None, max_length=500)
     anchors: list[Point] = Field(min_length=4, max_length=4)
     fields: list[SheetField] = Field(max_length=40)
     referenceImage: str | None = None
+    ocrEnabled: bool | None = None
     rollRegion: Region
     pageWidthMM: float = Field(default=210, ge=90, le=420)
     pageHeightMM: float = Field(default=297, ge=120, le=594)
@@ -87,11 +97,11 @@ class Layout(Document):
         raster(self.referenceImage, 2000000)
         if not 0.5 <= self.pageWidthMM / self.pageHeightMM <= 1:
             raise ValueError("Use a portrait page with width/height between 0.5 and 1.")
-        if self.rowGap < self.radius * 2 + 2 or self.optionGap < self.radius * 2 + 2:
+        if not self.questionRegions and (self.rowGap < self.radius * 2 + 2 or self.optionGap < self.radius * 2 + 2):
             raise ValueError("Layout bubbles overlap.")
         if len({f.id for f in self.fields}) != len(self.fields):
             raise ValueError("Layout field IDs must be unique.")
-        if self.anchorMode == "markers":
+        if self.anchorMode in ("markers", "fiducials"):
             for i, p in enumerate(self.anchors):
                 if not (17 <= p.x <= 1223 and 17 <= p.y <= 1737):
                     raise ValueError("Keep registration squares fully inside the page.")
@@ -182,6 +192,7 @@ class Exam(Document):
     date: str
     questions: int = Field(ge=1, le=500)
     optionCount: Literal[2, 3, 4, 5] = 4
+    questionTypes: list[Literal["choice", "integer3"]] | None = Field(default=None, min_length=1, max_length=500)
     marksCorrect: float = Field(gt=0, le=100)
     negativeMarks: float = Field(ge=0, le=100)
     passPercentage: float = Field(ge=1, le=100)
@@ -203,10 +214,12 @@ class Exam(Document):
                 raise ValueError()
         except ValueError as exc:
             raise ValueError("Use a valid YYYY-MM-DD examination date.") from exc
-        allowed = set("ABCDE"[: self.optionCount])
+        if self.questionTypes is not None and len(self.questionTypes) != self.questions:
+            raise ValueError("Question type count must match the examination.")
+        payload = self.model_dump(mode="json", by_alias=True, exclude_none=True)
         if (
             len(self.answers) != self.questions
-            or any(a and a not in allowed for a in self.answers)
+            or any(not valid_answer(payload, q, a) for q, a in enumerate(self.answers))
             or (self.published and not all(self.answers))
         ):
             raise ValueError("Answer key length, completeness or option count is invalid.")
@@ -214,7 +227,7 @@ class Exam(Document):
             raise ValueError("Question set codes must be unique.")
         for s in self.questionSets:
             if len(s.answers) != self.questions or any(
-                a is not None and (not a or len(set(a)) != len(a) or not set(a) <= allowed) for a in s.answers
+                a is not None and (not a or not valid_selection(payload, q, a)) for q, a in enumerate(s.answers)
             ):
                 raise ValueError("Question set answers must match the examination's question and option counts.")
         covered = set()
@@ -228,13 +241,18 @@ class Exam(Document):
         if self.layout:
             layout = self.layout
             if (
-                layout.columns > 1
+                not layout.questionRegions
+                and layout.columns > 1
                 and layout.columnGap
                 < (self.optionCount - 1) * layout.optionGap + 2 * layout.radius + layout.labelOffset + 10
             ):
                 raise ValueError("Question columns overlap.")
             rows = -(-layout.questionsPerPage // layout.columns)
-            for q in range(min(self.questions, layout.questionsPerPage)):
+            for q in range(
+                0
+                if layout.questionRegions or self.questionTypes and "integer3" in self.questionTypes
+                else min(self.questions, layout.questionsPerPage)
+            ):
                 x, y = layout.startX + (q // rows) * layout.columnGap, layout.startY + (q % rows) * layout.rowGap
                 if (
                     x - layout.labelOffset < 25
@@ -244,6 +262,8 @@ class Exam(Document):
                     or y + layout.radius > 1684
                 ):
                     raise ValueError("Bubble grid extends outside the printable page.")
+        if self.layout or self.questionTypes and "integer3" in self.questionTypes:
+            validate_geometry(payload)
         return self
 
 
@@ -252,7 +272,7 @@ class Detection(Document):
     selected: list[Option] = Field(max_length=5)
     status: Literal["blank", "filled", "partial", "erased", "multiple", "uncertain", "invalid", "manual"]
     confidence: float | None = Field(default=None, ge=0, le=100)
-    coordinates: list[dict] = Field(default_factory=list, max_length=5)
+    coordinates: list[dict] = Field(default_factory=list, max_length=30)
     verified: bool = False
 
 
@@ -323,12 +343,17 @@ class Workspace(Document):
             raise ValueError("Student class reference is invalid.")
         keys = set()
         exams = {e.id: e for e in self.exams}
+        contexts = {
+            e.id: {"questions": e.questions, "optionCount": e.optionCount, "questionTypes": e.questionTypes}
+            for e in self.exams
+        }
         for r in self.results:
+            context = contexts.get(r.examId, {})
             e = exams.get(r.examId)
             if (
                 not e
                 or len(r.answers) != e.questions
-                or any(a and a not in "ABCDE"[: e.optionCount] for a in r.answers)
+                or any(not valid_answer(context, q, a) for q, a in enumerate(r.answers))
                 or any(q < 0 or q >= e.questions for q in r.flagged)
             ):
                 raise ValueError("Result question or examination reference is invalid.")
@@ -342,7 +367,14 @@ class Workspace(Document):
                     or p
                     >= (
                         r.pageTotal
-                        or -(-e.questions // (e.layout.questionsPerPage if e.layout else min(100, e.questions)))
+                        or -(
+                            -e.questions
+                            // (
+                                e.layout.questionsPerPage
+                                if e.layout
+                                else default_layout(e.model_dump(exclude_none=True))["questionsPerPage"]
+                            )
+                        )
                     )
                     for p in r.pageIndices
                 )
@@ -350,7 +382,7 @@ class Workspace(Document):
                 raise ValueError("Invalid or duplicate scan page numbers.")
             if r.detectedOptions is not None and (
                 len(r.detectedOptions) != e.questions
-                or any(len(set(a)) != len(a) or not set(a) <= set("ABCDE"[: e.optionCount]) for a in r.detectedOptions)
+                or any(not valid_selection(context, q, a) for q, a in enumerate(r.detectedOptions))
             ):
                 raise ValueError("Invalid multi-answer response data.")
             if r.detectedOptions is not None and any(
@@ -361,8 +393,7 @@ class Workspace(Document):
                     "Scalar responses and selected-option evidence disagree. Verify the correction explicitly."
                 )
             if any(
-                not set(a.selected) <= set("ABCDE"[: e.optionCount])
-                or len(a.selected) != len(set(a.selected))
+                not valid_selection(context, a.question, a.selected)
                 or (r.detectedOptions is not None and a.selected != r.detectedOptions[a.question])
                 for a in r.answerMeta
                 if a.question < e.questions

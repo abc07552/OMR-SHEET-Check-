@@ -1,4 +1,5 @@
 import type { Exam, Result, Student, Workspace } from "./data";
+import { questionType } from "./answers";
 import {
   downloadFile,
   formatDate,
@@ -66,6 +67,9 @@ export async function exportExcel(
     "Correct (%)",
     ...getOptions(exam),
     "Unanswered",
+    ...(exam.questionTypes?.includes("integer3")
+      ? ["Integer response frequencies"]
+      : []),
   ]);
   questionStats(results, exam).forEach((q) => {
     const subject =
@@ -78,8 +82,17 @@ export async function exportExcel(
       q.correct,
       q.total,
       +q.percentage.toFixed(2),
-      ...q.counts.map((c) => c.count),
+      ...getOptions(exam).map(
+        (option) => q.counts.find((c) => c.option === option)?.count || 0,
+      ),
       q.blank,
+      ...(exam.questionTypes?.includes("integer3")
+        ? [
+            questionType(exam, q.number - 1) === "integer3"
+              ? q.counts.map((c) => `${c.option}: ${c.count}`).join("; ")
+              : "",
+          ]
+        : []),
     ]);
   });
   const subjects = book.addWorksheet("Subject rankings");

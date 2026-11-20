@@ -10,7 +10,7 @@
     "preview": "vite preview --host 0.0.0.0",
     "preview:pages": "vite preview --host 0.0.0.0 --base=/OMR-SHEET-Check-/ --outDir=docs",
     "test": "vitest run src",
-    "format": "prettier --write src server scripts e2e index.html vite.config.ts playwright.config.ts tsconfig*.json package.json README.md THIRD_PARTY.md documentation/TESTING.md documentation/DEPLOYMENT.md documentation/PROGRESS.md documentation/ARCHITECTURE.md documentation/ACCEPTANCE.md documentation/SECURITY_AUDIT.md documentation/PERFORMANCE.md deployment/compose.yaml .github/workflows/verify.yml capacitor.config.ts .github/workflows/main.yml documentation/ANDROID.md documentation/GOOGLE_AUTH_DRIVE.md",
+    "format": "prettier --write src server scripts e2e index.html vite.config.ts playwright.config.ts tsconfig*.json package.json README.md THIRD_PARTY.md documentation/TESTING.md documentation/DEPLOYMENT.md documentation/PROGRESS.md documentation/ARCHITECTURE.md documentation/ACCEPTANCE.md documentation/SECURITY_AUDIT.md documentation/PERFORMANCE.md deployment/compose.yaml .github/workflows/verify.yml capacitor.config.ts .github/workflows/main.yml documentation/ANDROID.md documentation/GOOGLE_AUTH_DRIVE.md documentation/INTEGER_LAYOUT_SCANNING.md",
     "predev": "node scripts/prepare-assets.mjs",
     "prebuild": "node scripts/prepare-assets.mjs",
     "prebuild:pages": "node scripts/prepare-assets.mjs",
@@ -20,7 +20,7 @@
     "test:all": "npm test && npm run test:server",
     "admin:reset": "node --env-file-if-exists=.env server/reset-password.mjs",
     "test:e2e": "playwright test",
-    "format:check": "prettier --check src server scripts e2e index.html vite.config.ts playwright.config.ts tsconfig*.json package.json README.md THIRD_PARTY.md documentation/TESTING.md documentation/DEPLOYMENT.md documentation/PROGRESS.md documentation/ARCHITECTURE.md documentation/ACCEPTANCE.md documentation/SECURITY_AUDIT.md documentation/PERFORMANCE.md deployment/compose.yaml .github/workflows/verify.yml capacitor.config.ts .github/workflows/main.yml documentation/ANDROID.md documentation/GOOGLE_AUTH_DRIVE.md",
+    "format:check": "prettier --check src server scripts e2e index.html vite.config.ts playwright.config.ts tsconfig*.json package.json README.md THIRD_PARTY.md documentation/TESTING.md documentation/DEPLOYMENT.md documentation/PROGRESS.md documentation/ARCHITECTURE.md documentation/ACCEPTANCE.md documentation/SECURITY_AUDIT.md documentation/PERFORMANCE.md deployment/compose.yaml .github/workflows/verify.yml capacitor.config.ts .github/workflows/main.yml documentation/ANDROID.md documentation/GOOGLE_AUTH_DRIVE.md documentation/INTEGER_LAYOUT_SCANNING.md",
     "android:sync": "node scripts/prepare-android.mjs",
     "android:debug": "npm run android:sync && cd android && ./gradlew --no-daemon assembleDebug",
     "android:open": "cap open android"

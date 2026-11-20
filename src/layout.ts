@@ -1,4 +1,6 @@
 import type { Exam } from "./data";
+import { questionType } from "./answers";
+import type { QuestionType } from "./answers";
 
 export interface Point {
   x: number;
@@ -29,6 +31,13 @@ export function isEmbeddedRaster(
     /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(value)
   );
 }
+export interface QuestionRegion {
+  /** Global zero-based question number; page comes from questionsPerPage. */
+  question: number;
+  radius: number;
+  /** Choice order A–E, or 30 points in column-major order: hundreds 0–9, tens 0–9, units 0–9. */
+  points: Point[];
+}
 export interface OMRLayout {
   version: 2;
   name: string;
@@ -43,10 +52,13 @@ export interface OMRLayout {
   labelOffset: number;
   bubbleShape: "circle" | "square";
   threshold: number;
-  anchorMode: "markers" | "page";
+  anchorMode: "markers" | "page" | "fiducials";
+  questionRegions?: QuestionRegion[];
   anchors: Point[];
   fields: SheetField[];
   referenceImage?: string;
+  /** Imported sheets start disabled until the operator calibrates the identity crop. */
+  ocrEnabled?: boolean;
   rollRegion: { x: number; y: number; width: number; height: number };
 }
 export const WIDTH = 1240,
@@ -58,10 +70,11 @@ export const DEFAULT_ANCHORS: Point[] = [
   { x: 55, y: 1699 },
 ];
 export function defaultLayout(
-  exam: Pick<Exam, "questions" | "optionCount">,
+  exam: Pick<Exam, "questions" | "optionCount" | "questionTypes">,
 ): OMRLayout {
-  const perPage = Math.min(100, exam.questions),
-    columns = perPage > 60 ? 4 : 2;
+  const numeric = exam.questionTypes?.includes("integer3"),
+    perPage = Math.min(numeric ? 12 : 100, exam.questions),
+    columns = numeric || perPage > 60 ? 4 : 2;
   return {
     version: 2,
     name: "Markly standard",
@@ -70,7 +83,9 @@ export function defaultLayout(
     startX: columns === 4 ? 156 : 210,
     startY: 420,
     columnGap: 1100 / columns,
-    rowGap: Math.min(44, 1120 / Math.max(1, Math.ceil(perPage / columns) - 1)),
+    rowGap: numeric
+      ? 370
+      : Math.min(44, 1120 / Math.max(1, Math.ceil(perPage / columns) - 1)),
     optionGap:
       columns === 4
         ? exam.optionCount === 5
@@ -208,8 +223,11 @@ export function pageCount(exam: Exam) {
  * change without invalidating a sheet; bubble coordinates/pagination cannot. */
 export function sheetSignature(exam: Exam): string {
   const l = getLayout(exam);
-  const value = JSON.stringify([
-    !!exam.layout || (exam.optionCount || 4) !== 4 || exam.questions > 100,
+  const geometry: unknown[] = [
+    !!exam.layout ||
+      (exam.optionCount || 4) !== 4 ||
+      exam.questions > 100 ||
+      !!exam.questionTypes?.includes("integer3"),
     exam.questions,
     exam.optionCount || 4,
     l.questionsPerPage,
@@ -222,8 +240,17 @@ export function sheetSignature(exam: Exam): string {
     l.radius,
     l.bubbleShape,
     l.anchorMode,
-    l.anchors,
-  ]);
+    l.anchors.map(({ x, y }) => ({ x, y })),
+  ];
+  // Append only for new geometry: preserve every historical MCQ signature.
+  if (exam.questionTypes?.includes("integer3") || l.questionRegions?.length)
+    geometry.push(
+      Array.from({ length: exam.questions }, (_, q) => questionType(exam, q)),
+      [...(l.questionRegions || [])]
+        .sort((a, b) => a.question - b.question)
+        .map((r) => [r.question, r.radius, r.points.map((p) => [p.x, p.y])]),
+    );
+  const value = JSON.stringify(geometry);
   let hash = 2166136261;
   for (let i = 0; i < value.length; i++)
     hash = Math.imul(hash ^ value.charCodeAt(i), 16777619);
@@ -250,6 +277,46 @@ export function layoutBubble(
       { length: optionCount },
       (_, i) => l.startX + col * l.columnGap + i * l.optionGap,
     ),
+  };
+}
+/** Canonical geometry used by print, measurement, overlays and imported layouts. */
+export function layoutQuestionPoints(
+  questionOnPage: number,
+  exam: Exam,
+  page = 0,
+) {
+  const l = getLayout(exam),
+    q = page * l.questionsPerPage + questionOnPage;
+  const region = l.questionRegions?.find((r) => r.question === q);
+  const numeric = questionType(exam, q) === "integer3";
+  const p = layoutBubble(questionOnPage, exam);
+  const points =
+    region?.points ||
+    (numeric
+      ? Array.from({ length: 30 }, (_, i) => ({
+          x: p.xs[0] + Math.floor(i / 10) * l.optionGap,
+          y: p.y + (i % 10) * 30,
+        }))
+      : p.xs.map((x) => ({ x, y: p.y })));
+  return { points, radius: region?.radius ?? p.radius, numeric };
+}
+export function regularRegion(
+  question: number,
+  x: number,
+  y: number,
+  gap: number,
+  rowGap: number,
+  radius: number,
+  numeric: boolean,
+  options = 4,
+): QuestionRegion {
+  return {
+    question,
+    radius,
+    points: Array.from({ length: numeric ? 30 : options }, (_, i) => ({
+      x: x + (numeric ? Math.floor(i / 10) : i) * gap,
+      y: y + (numeric ? i % 10 : 0) * rowGap,
+    })),
   };
 }
 export function layoutErrors(exam: Exam): string[] {
@@ -291,9 +358,10 @@ export function layoutErrors(exam: Exam): string[] {
   if (
     l.radius < 5 ||
     l.radius > 25 ||
-    l.optionGap < l.radius * 2 + 2 ||
-    l.rowGap < l.radius * 2 + 2 ||
-    (l.columns > 1 &&
+    (!l.questionRegions?.length && l.optionGap < l.radius * 2 + 2) ||
+    (!l.questionRegions?.length && l.rowGap < l.radius * 2 + 2) ||
+    (!l.questionRegions?.length &&
+      l.columns > 1 &&
       l.columnGap <
         ((exam.optionCount || 4) - 1) * l.optionGap +
           l.radius * 2 +
@@ -304,7 +372,7 @@ export function layoutErrors(exam: Exam): string[] {
   if (l.anchors.length !== 4)
     errors.push("Four registration points are required.");
   if (
-    l.anchorMode === "markers" &&
+    l.anchorMode !== "page" &&
     l.anchors.some(
       (p, i) =>
         p.x < 17 ||
@@ -318,18 +386,82 @@ export function layoutErrors(exam: Exam): string[] {
     errors.push(
       "Keep registration squares in the four outer corner regions, ordered top-left, top-right, bottom-right, bottom-left. Use paper-edge mode for sheets without corner markers.",
     );
-  for (let q = 0; q < Math.min(l.questionsPerPage, exam.questions); q++) {
-    const p = layoutBubble(q, exam);
+  if (
+    l.questionRegions &&
+    (l.questionRegions.length > 500 ||
+      new Set(l.questionRegions.map((r) => r.question)).size !==
+        l.questionRegions.length ||
+      l.questionRegions.some(
+        (r) =>
+          !Number.isInteger(r.question) ||
+          r.question < 0 ||
+          r.question >= exam.questions,
+      ))
+  )
+    errors.push(
+      "Imported regions need unique question numbers inside this assessment.",
+    );
+  const regions: {
+    page: number;
+    q: number;
+    points: Point[];
+    radius: number;
+  }[] = [];
+  for (let q = 0; q < exam.questions; q++) {
+    const page = Math.floor(q / l.questionsPerPage),
+      p = layoutQuestionPoints(q % l.questionsPerPage, exam, page);
     if (
-      p.labelX < 25 ||
-      p.xs.some((x) => x - p.radius < 25 || x + p.radius > WIDTH - 25) ||
-      p.y - p.radius < 25 ||
-      p.y + p.radius > HEIGHT - 70
+      p.points.length !== (p.numeric ? 30 : exam.optionCount || 4) ||
+      !Number.isFinite(p.radius) ||
+      p.radius < 5 ||
+      p.radius > 25 ||
+      p.points.some(
+        (a) =>
+          !Number.isFinite(a.x) ||
+          !Number.isFinite(a.y) ||
+          a.x - p.radius < 25 ||
+          a.x + p.radius > WIDTH - 25 ||
+          a.y - p.radius < 25 ||
+          a.y + p.radius > HEIGHT - 70,
+      )
     ) {
-      errors.push("The bubble grid extends beyond the printable area.");
+      errors.push(
+        "The bubble grid extends beyond the printable area or has the wrong number of bubbles.",
+      );
       break;
     }
+    regions.push({ page, q, ...p });
   }
+  // Check actual circles, not only their enclosing rectangles (mixed sections may interleave).
+  const spatial = new Map<string, { x: number; y: number; radius: number }[]>();
+  for (const r of regions)
+    for (const p of r.points) {
+      const cx = Math.floor(p.x / 52),
+        cy = Math.floor(p.y / 52);
+      for (let dx = -1; dx <= 1; dx++)
+        for (let dy = -1; dy <= 1; dy++) {
+          if (
+            (spatial.get(`${r.page}:${cx + dx}:${cy + dy}`) || []).some(
+              (a) =>
+                (l.bubbleShape === "square"
+                  ? Math.max(Math.abs(a.x - p.x), Math.abs(a.y - p.y))
+                  : Math.hypot(a.x - p.x, a.y - p.y)) <
+                a.radius + r.radius + 2,
+            )
+          )
+            return [
+              ...new Set([
+                ...errors,
+                "Bubbles overlap. Move the question regions or reduce their radius.",
+              ]),
+            ];
+        }
+      const key = `${r.page}:${cx}:${cy}`;
+      spatial.set(key, [
+        ...(spatial.get(key) || []),
+        { ...p, radius: r.radius },
+      ]);
+    }
   if (
     l.fields.some(
       (f) =>
@@ -360,4 +492,23 @@ export function layoutErrors(exam: Exam): string[] {
       break;
     }
   return [...new Set(errors)];
+}
+
+/** Changing response type is deliberate and invalidates that key, not student data. */
+export function changeQuestionTypes(exam: Exam, types: QuestionType[]): Exam {
+  const next = {
+    ...exam,
+    questionTypes: types,
+    answers: exam.answers.map((a, q) =>
+      questionType(exam, q) === types[q] ? a : null,
+    ),
+    questionSets: exam.questionSets?.map((set) => ({
+      ...set,
+      answers: set.answers.map((a, q) =>
+        questionType(exam, q) === types[q] ? a : null,
+      ),
+    })),
+    published: false,
+  };
+  return { ...next, layout: defaultLayout(next) };
 }

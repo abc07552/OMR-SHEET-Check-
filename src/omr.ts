@@ -1,10 +1,12 @@
 import QRCode from "qrcode";
 import { OPTIONS, getOptions, downloadFile } from "./data";
+import { classifyInk, classifyInteger } from "./answers";
 import type { AnswerDetection, Exam, Option } from "./data";
 import {
   DEFAULT_ANCHORS,
   getLayout,
   layoutBubble,
+  layoutQuestionPoints,
   pageCount,
   pageQuestionCount,
   sheetSignature,
@@ -46,11 +48,23 @@ export function bubbleLayout(question: number, count: number, optionCount = 4) {
   };
 }
 const isModern = (exam: Exam) =>
-  !!exam.layout || (exam.optionCount || 4) !== 4 || exam.questions > 100;
+  !!exam.layout ||
+  (exam.optionCount || 4) !== 4 ||
+  exam.questions > 100 ||
+  !!exam.questionTypes?.includes("integer3");
 export function questionPosition(q: number, exam: Exam, page = 0) {
   return isModern(exam)
     ? layoutBubble(q, exam)
     : bubbleLayout(q, pageQuestionCount(exam, page), getOptions(exam).length);
+}
+export function questionBubbles(q: number, exam: Exam, page = 0) {
+  if (isModern(exam)) return layoutQuestionPoints(q, exam, page);
+  const p = questionPosition(q, exam, page);
+  return {
+    points: p.xs.map((x) => ({ x, y: p.y })),
+    radius: p.radius,
+    numeric: false,
+  };
 }
 function legacySheet(
   exam: Exam,
@@ -171,7 +185,7 @@ export async function createSheet(
   ctx.fillStyle = "#fff";
   ctx.fillRect(0, 0, WIDTH, HEIGHT);
   ctx.fillStyle = "#111";
-  if (l.anchorMode === "markers")
+  if (l.anchorMode === "markers" || l.anchorMode === "fiducials")
     l.anchors.forEach((p) => ctx.fillRect(p.x - 17, p.y - 17, 34, 34));
   const vars: Record<string, string> = {
     exam: exam.title,
@@ -249,33 +263,65 @@ export async function createSheet(
       ctx.restore();
     });
   const count = pageQuestionCount(exam, page),
-    options = getOptions(exam),
-    rows = Math.ceil(l.questionsPerPage / l.columns);
-  for (let col = 0; col < l.columns; col++) {
-    const p = layoutBubble(col * rows, exam);
-    ctx.font = "bold 16px sans-serif";
-    ctx.textAlign = "center";
-    options.forEach((o, i) => ctx.fillText(o, p.xs[i], l.startY - 31));
-  }
-  ctx.textAlign = "left";
+    options = getOptions(exam);
   for (let q = 0; q < count; q++) {
-    const p = layoutBubble(q, exam);
+    const p = questionBubbles(q, exam, page),
+      first = p.points[0],
+      global = page * l.questionsPerPage + q;
+    ctx.textAlign = "left";
     ctx.font = "17px sans-serif";
     ctx.fillStyle = "#222";
     ctx.fillText(
-      String(page * l.questionsPerPage + q + 1).padStart(2, "0"),
-      p.labelX,
-      p.y + 5,
+      String(global + 1).padStart(2, "0"),
+      Math.max(25, first.x - p.radius - 40),
+      first.y + 5,
     );
-    p.xs.forEach((x, i) => {
+    if (p.numeric) {
+      ctx.font = "13px sans-serif";
+      ctx.textAlign = "center";
+      ["100", "10", "1"].forEach((label, i) =>
+        ctx.fillText(label, p.points[i * 10].x, first.y - p.radius - 12),
+      );
+      ctx.textAlign = "right";
+      for (let digit = 0; digit < 10; digit++)
+        ctx.fillText(
+          String(digit),
+          first.x - p.radius - 6,
+          p.points[digit].y + 4,
+        );
+    } else {
+      const crowded = Array.from({ length: q }, (_, previous) =>
+        questionBubbles(previous, exam, page),
+      ).some((r) =>
+        r.points.some(
+          (b) =>
+            Math.abs(b.x - first.x) < p.radius &&
+            first.y - b.y > 0 &&
+            first.y - b.y < p.radius * 2 + 25,
+        ),
+      );
+      if (!crowded) {
+        ctx.font = "13px sans-serif";
+        ctx.textAlign = "center";
+        p.points.forEach((b, i) =>
+          ctx.fillText(options[i], b.x, b.y - p.radius - 8),
+        );
+      }
+    }
+    p.points.forEach((b, i) => {
       ctx.beginPath();
       if (l.bubbleShape === "square")
-        ctx.rect(x - p.radius, p.y - p.radius, p.radius * 2, p.radius * 2);
-      else ctx.arc(x, p.y, p.radius, 0, Math.PI * 2);
+        ctx.rect(b.x - p.radius, b.y - p.radius, p.radius * 2, p.radius * 2);
+      else ctx.arc(b.x, b.y, p.radius, 0, Math.PI * 2);
       ctx.strokeStyle = "#333";
       ctx.lineWidth = 1.5;
       ctx.stroke();
-      if (answers?.[page * l.questionsPerPage + q] === options[i]) {
+      const answer = answers?.[global];
+      if (
+        p.numeric
+          ? answer?.[Math.floor(i / 10)] === String(i % 10)
+          : answer === options[i]
+      ) {
         ctx.fillStyle = "#111";
         ctx.fill();
       }
@@ -518,8 +564,8 @@ function sampleBubbles(
     return (data.data[i] + data.data[i + 1] + data.data[i + 2]) / 3;
   };
   for (let q = 0; q < pageQuestionCount(exam, page); q++) {
-    const l = questionPosition(q, exam, page),
-      measurements = l.xs.map((x) => {
+    const l = questionBubbles(q, exam, page),
+      measurements = l.points.map(({ x, y }) => {
         // Estimate nearby paper, not a fixed global brightness. The upper
         // quartile avoids an outline, adjacent mark or text darkening the baseline.
         const paper: number[] = [];
@@ -530,7 +576,7 @@ function sampleBubbles(
             distance =
               (l.radius + 4) /
               (square ? Math.max(Math.abs(dx), Math.abs(dy)) : 1),
-            value = brightnessAt(x + dx * distance, l.y + dy * distance);
+            value = brightnessAt(x + dx * distance, y + dy * distance);
           if (value !== undefined) paper.push(value);
         }
         paper.sort((a, b) => a - b);
@@ -543,7 +589,7 @@ function sampleBubbles(
         for (let sy = -r; sy <= r; sy += 1.5)
           for (let sx = -r; sx <= r; sx += 1.5) {
             if (!square && sx * sx + sy * sy > r * r) continue;
-            const value = brightnessAt(x + sx, l.y + sy);
+            const value = brightnessAt(x + sx, y + sy);
             if (value === undefined) {
               invalid = true;
               continue;
@@ -556,31 +602,17 @@ function sampleBubbles(
       darkness = measurements.map((m) => m.ratio),
       invalid = measurements.some((m) => m.invalid);
     const threshold = exam.layout?.threshold || 0.52;
-    const filled = invalid
-      ? []
-      : darkness.map((v, i) => ({ v, i })).filter((a) => a.v >= threshold);
-    const selected = filled.map((f) => getOptions(exam)[f.i]);
-    const maximum = Math.max(...darkness),
-      others = darkness.filter((_, i) => i !== filled[0]?.i);
-    let status: AnswerDetection["status"] = "blank";
-    if (invalid) status = "invalid";
-    else if (filled.length > 1) status = "multiple";
-    else if (filled.length === 1)
-      status =
-        maximum < threshold + 0.12 || others.some((v) => v > 0.22)
-          ? "uncertain"
-          : "filled";
-    else if (maximum > 0.32) status = "partial";
-    else if (maximum > 0.22) status = "erased";
+    const classification = l.numeric
+      ? classifyInteger(darkness, threshold, invalid)
+      : classifyInk(darkness, threshold, invalid);
+    const { status, confidence } = classification;
+    const selected: Option[] = l.numeric
+      ? (classification as ReturnType<typeof classifyInteger>).selected
+      : (classification as ReturnType<typeof classifyInk>).filled.map(
+          (i) => getOptions(exam)[i],
+        );
     if (status !== "blank" && status !== "filled") flagged.push(q);
-    const confidence = invalid
-      ? 0
-      : filled.length === 1
-        ? Math.max(0, maximum - Math.max(0, ...others))
-        : filled.length
-          ? 0
-          : 1 - maximum;
-    answers.push(filled.length === 1 ? selected[0] : null);
+    answers.push(selected.length === 1 ? selected[0] : null);
     confidences.push(confidence);
     detectedOptions.push(selected);
     answerMeta.push({
@@ -589,12 +621,14 @@ function sampleBubbles(
       status,
       confidence: confidence * 100,
       verified: false,
-      coordinates: l.xs.map((x, i) => ({
-        ...map(x, l.y),
+      coordinates: l.points.map(({ x, y }, i) => ({
+        ...map(x, y),
         alignedX: x,
-        alignedY: l.y,
+        alignedY: y,
         radius: l.radius,
-        option: getOptions(exam)[i],
+        ...(l.numeric
+          ? { digitColumn: Math.floor(i / 10), digit: i % 10 }
+          : { option: getOptions(exam)[i] }),
         inkRatio: darkness[i],
       })),
     });
