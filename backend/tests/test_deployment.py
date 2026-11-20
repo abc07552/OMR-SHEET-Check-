@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import re
+import shlex
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -84,3 +87,35 @@ def test_production_configuration_rejects_local_database_or_missing_https_and_ke
             backup_key="not-used-before-connection",
             public_url="http://insecure.example",
         )
+
+
+@pytest.mark.parametrize("definition", ["Dockerfile", "deployment/Dockerfile.node"])
+def test_container_builder_copies_local_json_imports_in_typechecked_client(definition):
+    """The builder runs strict tsc on tests too; COPY must include their fixtures."""
+    root = Path(__file__).resolve().parents[2]
+    builder = (root / definition).read_text().split("RUN npm run build", 1)[0]
+    copies = []
+    for line in builder.splitlines():
+        parts = shlex.split(line)
+        if parts and parts[0] == "COPY":
+            for pattern in parts[1:-1]:
+                copies.extend((p, Path(parts[-1])) for p in root.glob(pattern))
+    imports = []
+    for source in (root / "src").rglob("*"):
+        if source.suffix not in (".ts", ".tsx"):
+            continue
+        for name in re.findall(r"(?:from\s+|import\s*)[\"\'](\.\.?/[^\"\']+\.json)[\"\']", source.read_text()):
+            imports.append((source.parent / name).resolve())
+    assert imports, "Keep the shared real build-input fixture in this regression."
+    for fixture in imports:
+        assert fixture.is_file()
+        expected = fixture.relative_to(root)
+        assert any(
+            (
+                source.is_dir()
+                and fixture.is_relative_to(source)
+                and destination / fixture.relative_to(source) == expected
+            )
+            or (source == fixture and destination / fixture.name == expected)
+            for source, destination in copies
+        ), f"{definition} omits {expected} required by the strict client build"

@@ -409,3 +409,23 @@ inferred from the previous Google-enabled APK. The deployed HTTPS app/backend
 must also be updated for a paired Android installation to use these changes.
 Physical device/chooser/print/erasure/lighting, live providers and permanent
 production deployment retain the earlier acceptance boundaries.
+
+### Container packaging follow-up
+
+Source checkpoint `5951c17` passed the fresh Android build
+[44691449343](https://github.com/abc07552/OMR-SHEET-Check-/actions/runs/44691449343),
+including native JVM/lint/signature/manifest gates. The enterprise run
+[44691449300](https://github.com/abc07552/OMR-SHEET-Check-/actions/runs/44691449300)
+passed its full regression/browser/advisory job but exposed a container-builder
+failure. Reproducing the actual Docker `COPY` inputs
+in an isolated local directory produced **TS2307** for the shared synthetic JSON
+fixture: tests are correctly included in strict TypeScript, but neither web
+Docker builder copied `test-fixtures/`.
+
+Both enterprise and preserved Node builders now include that **synthetic-only**
+directory. Strict checking was not disabled and private `.cache/` images remain
+excluded. Two parametrized packaging regressions were observed failing before
+the fix and pass afterward; the same isolated copy context now builds
+successfully. This adds two deployment regressions to the full 295-test backend
+checkpoint above. Check the follow-up commit's fresh CI result rather than
+counting the earlier failed container run as success.

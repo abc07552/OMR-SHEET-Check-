@@ -7,6 +7,7 @@ RUN npm ci
 COPY index.html vite.config.ts capacitor.config.ts tsconfig*.json ./
 COPY public ./public
 COPY src ./src
+COPY test-fixtures ./test-fixtures
 COPY scripts ./scripts
 RUN npm run build
 
